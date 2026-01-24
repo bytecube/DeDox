@@ -1,0 +1,44 @@
+# Python dependencies for DeDox Sidecar Service
+
+# Web framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic[email]>=2.5.0
+pydantic-settings>=2.1.0
+jinja2>=3.1.0
+
+# Database
+aiosqlite>=0.19.0
+
+# HTTP client
+httpx>=0.25.0
+
+# Authentication
+PyJWT>=2.8.0
+passlib>=1.7.4
+bcrypt==4.0.1
+
+# Image processing
+opencv-python-headless>=4.8.0
+Pillow>=10.1.0
+numpy>=1.26.0
+pdf2image>=1.16.0
+
+# OCR
+pytesseract>=0.3.10
+
+# Configuration
+PyYAML>=6.0.1
+
+# Utilities
+python-multipart>=0.0.6
+
+# Development
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+httpx  # for testing
+
+# Type checking
+mypy>=1.7.0
+types-PyYAML>=6.0.0

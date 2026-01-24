@@ -1,0 +1,420 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div x-data="dashboardPage()" x-init="loadData(); startAutoRefresh()">
+    <!-- Page Header -->
+    <div class="page-header">
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div>
+                <h1 class="page-title">Processing Dashboard</h1>
+                <p class="page-subtitle">Monitor document processing and system status</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <span class="text-sm text-surface-500 dark:text-surface-400" x-text="new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })"></span>
+                <span x-show="hasActiveJobs" class="flex items-center gap-2 text-sm text-primary-600 dark:text-primary-400">
+                    <span class="w-2 h-2 bg-primary-500 rounded-full animate-pulse"></span>
+                    Live
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Grid -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 mb-8">
+        <!-- Processed Today -->
+        <div class="stat-card animate-fade-up stagger-1" style="opacity: 0;">
+            <div class="stat-icon stat-icon-primary">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+            </div>
+            <div class="flex-1 min-w-0">
+                <p class="stat-label">Processed Today</p>
+                <p class="stat-value" x-text="stats.processedToday">0</p>
+                <p class="stat-trend stat-trend-up" x-show="stats.processedToday > 0">
+                    <span x-text="stats.avgProcessingTime ? 'Avg: ' + stats.avgProcessingTime + 's' : ''"></span>
+                </p>
+            </div>
+        </div>
+
+        <!-- Queued -->
+        <div class="stat-card animate-fade-up stagger-2" style="opacity: 0;">
+            <div class="stat-icon stat-icon-accent">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                </svg>
+            </div>
+            <div class="flex-1 min-w-0">
+                <p class="stat-label">Queued</p>
+                <p class="stat-value" x-text="stats.queued">0</p>
+                <a href="/jobs?status=queued" class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline" x-show="stats.queued > 0">View queue</a>
+            </div>
+        </div>
+
+        <!-- Processing -->
+        <div class="stat-card animate-fade-up stagger-3" style="opacity: 0;">
+            <div class="stat-icon stat-icon-success">
+                <svg x-show="stats.processing > 0" class="w-6 h-6 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                <svg x-show="stats.processing === 0" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+            </div>
+            <div class="flex-1 min-w-0">
+                <p class="stat-label">Processing</p>
+                <p class="stat-value" x-text="stats.processing">0</p>
+                <a href="/jobs?status=processing" class="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline" x-show="stats.processing > 0">View active</a>
+            </div>
+        </div>
+
+        <!-- Failed -->
+        <div class="stat-card animate-fade-up stagger-4" style="opacity: 0;">
+            <div class="stat-icon" :class="stats.failed > 0 ? 'bg-red-100 dark:bg-red-900/30' : 'bg-surface-100 dark:bg-surface-800'">
+                <svg class="w-6 h-6" :class="stats.failed > 0 ? 'text-red-600 dark:text-red-400' : 'text-surface-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+            </div>
+            <div class="flex-1 min-w-0">
+                <p class="stat-label">Failed</p>
+                <p class="stat-value" :class="stats.failed > 0 ? 'text-red-600 dark:text-red-400' : ''" x-text="stats.failed">0</p>
+                <a href="/jobs?status=failed" class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline" x-show="stats.failed > 0">View errors</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Status Panel -->
+    <div class="card mb-8 animate-fade-up stagger-5" style="opacity: 0;">
+        <div class="card-header border-b border-surface-100 dark:border-surface-800">
+            <h2 class="section-title">System Status</h2>
+        </div>
+        <div class="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- Paperless-ngx Status -->
+            <div class="flex items-center gap-3 p-3 bg-surface-50 dark:bg-surface-800/50 rounded-lg">
+                <div class="w-10 h-10 rounded-lg flex items-center justify-center"
+                     :class="systemStatus.paperless?.status === 'online' ? 'bg-green-100 dark:bg-green-900/30' : 'bg-red-100 dark:bg-red-900/30'">
+                    <svg class="w-5 h-5" :class="systemStatus.paperless?.status === 'online' ? 'text-green-600' : 'text-red-600'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                    </svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-surface-900 dark:text-white">Paperless-ngx</p>
+                    <p class="text-xs text-surface-500 dark:text-surface-400 capitalize" x-text="systemStatus.paperless?.status || 'Checking...'"></p>
+                </div>
+                <div class="w-2 h-2 rounded-full"
+                     :class="systemStatus.paperless?.status === 'online' ? 'bg-green-500' : 'bg-red-500'"></div>
+            </div>
+
+            <!-- Ollama Status -->
+            <div class="flex items-center gap-3 p-3 bg-surface-50 dark:bg-surface-800/50 rounded-lg">
+                <div class="w-10 h-10 rounded-lg flex items-center justify-center"
+                     :class="systemStatus.ollama?.status === 'online' ? 'bg-green-100 dark:bg-green-900/30' : 'bg-red-100 dark:bg-red-900/30'">
+                    <svg class="w-5 h-5" :class="systemStatus.ollama?.status === 'online' ? 'text-green-600' : 'text-red-600'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-surface-900 dark:text-white">Ollama LLM</p>
+                    <p class="text-xs text-surface-500 dark:text-surface-400 truncate" x-text="systemStatus.ollama?.status === 'online' ? (systemStatus.ollama?.configured_model || 'Online') : (systemStatus.ollama?.status || 'Checking...')"></p>
+                </div>
+                <div class="w-2 h-2 rounded-full"
+                     :class="systemStatus.ollama?.status === 'online' ? 'bg-green-500' : 'bg-red-500'"></div>
+            </div>
+
+            <!-- Tesseract Status -->
+            <div class="flex items-center gap-3 p-3 bg-surface-50 dark:bg-surface-800/50 rounded-lg">
+                <div class="w-10 h-10 rounded-lg flex items-center justify-center"
+                     :class="systemStatus.tesseract?.status === 'available' ? 'bg-green-100 dark:bg-green-900/30' : 'bg-red-100 dark:bg-red-900/30'">
+                    <svg class="w-5 h-5" :class="systemStatus.tesseract?.status === 'available' ? 'text-green-600' : 'text-red-600'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-surface-900 dark:text-white">Tesseract OCR</p>
+                    <p class="text-xs text-surface-500 dark:text-surface-400 truncate" x-text="systemStatus.tesseract?.version || systemStatus.tesseract?.status || 'Checking...'"></p>
+                </div>
+                <div class="w-2 h-2 rounded-full"
+                     :class="systemStatus.tesseract?.status === 'available' ? 'bg-green-500' : 'bg-red-500'"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Two Column Layout: Activity & Quick Actions -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        <!-- Recent Activity -->
+        <div class="lg:col-span-2 card animate-fade-up stagger-6" style="opacity: 0;">
+            <div class="card-header border-b border-surface-100 dark:border-surface-800">
+                <div class="section-header mb-0">
+                    <h2 class="section-title">Recent Activity</h2>
+                    <a href="/jobs" class="text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline">View all</a>
+                </div>
+            </div>
+            <div class="divide-y divide-surface-100 dark:divide-surface-800 max-h-96 overflow-y-auto">
+                <template x-if="recentJobs.length === 0 && !isLoading">
+                    <div class="empty-state py-10">
+                        <svg class="empty-state-icon w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <p class="empty-state-title">No recent activity</p>
+                        <p class="empty-state-description">Processing jobs will appear here</p>
+                    </div>
+                </template>
+                <template x-for="job in recentJobs" :key="job.id">
+                    <a :href="'/jobs?highlight=' + job.id" class="flex items-center gap-4 p-4 hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors cursor-pointer block">
+                        <!-- Status Icon -->
+                        <div class="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
+                             :class="{
+                                 'bg-green-100 dark:bg-green-900/30': job.status === 'completed',
+                                 'bg-blue-100 dark:bg-blue-900/30': job.status === 'processing',
+                                 'bg-amber-100 dark:bg-amber-900/30': job.status === 'queued',
+                                 'bg-red-100 dark:bg-red-900/30': job.status === 'failed'
+                             }">
+                            <svg x-show="job.status === 'completed'" class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                            </svg>
+                            <svg x-show="job.status === 'processing'" class="w-5 h-5 text-blue-600 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            <svg x-show="job.status === 'queued'" class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <svg x-show="job.status === 'failed'" class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </div>
+                        <!-- Job Info -->
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 mb-0.5">
+                                <p class="text-sm font-medium text-surface-900 dark:text-white truncate" x-text="job.document_filename || ('Job #' + job.id.slice(0, 8))"></p>
+                                <span class="badge shrink-0" :class="getJobStatusClass(job.status)" x-text="job.status"></span>
+                            </div>
+                            <div class="flex items-center gap-2 text-xs text-surface-500 dark:text-surface-400">
+                                <span x-text="job.current_stage || 'Queued'"></span>
+                                <span x-show="job.paperless_id" class="text-primary-500">• Paperless #<span x-text="job.paperless_id"></span></span>
+                            </div>
+                        </div>
+                        <!-- Progress / Time -->
+                        <div class="text-right shrink-0">
+                            <template x-if="job.status === 'processing' || job.status === 'queued'">
+                                <div class="w-24">
+                                    <div class="progress h-1.5 mb-1">
+                                        <div class="progress-bar" :style="'width: ' + (job.progress || 0) + '%'"></div>
+                                    </div>
+                                    <p class="text-xs text-surface-500 dark:text-surface-400" x-text="job.progress + '%'"></p>
+                                </div>
+                            </template>
+                            <template x-if="job.status === 'completed' || job.status === 'failed'">
+                                <p class="text-xs text-surface-500 dark:text-surface-400" x-text="formatTimeAgo(job.completed_at || job.created_at)"></p>
+                            </template>
+                        </div>
+                    </a>
+                </template>
+                <!-- Loading skeleton -->
+                <template x-if="isLoading">
+                    <div>
+                        <template x-for="i in 5">
+                            <div class="flex items-center gap-4 p-4">
+                                <div class="skeleton w-10 h-10 rounded-lg shrink-0"></div>
+                                <div class="flex-1">
+                                    <div class="skeleton h-4 w-24 mb-2 rounded"></div>
+                                    <div class="skeleton h-3 w-32 rounded"></div>
+                                </div>
+                                <div class="skeleton h-3 w-16 rounded"></div>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- Quick Actions & Statistics -->
+        <div class="space-y-6">
+            <!-- Quick Actions -->
+            <div class="card animate-fade-up stagger-7" style="opacity: 0;">
+                <div class="card-header border-b border-surface-100 dark:border-surface-800">
+                    <h2 class="section-title">Quick Actions</h2>
+                </div>
+                <div class="p-4 space-y-3">
+                    <a href="/jobs" class="flex items-center gap-3 p-3 bg-surface-50 dark:bg-surface-800/50 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors">
+                        <div class="w-10 h-10 bg-gradient-to-br from-primary-500 to-primary-600 rounded-lg flex items-center justify-center">
+                            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                        </div>
+                        <div>
+                            <p class="text-sm font-medium text-surface-900 dark:text-white">View Jobs</p>
+                            <p class="text-xs text-surface-500 dark:text-surface-400">Monitor processing</p>
+                        </div>
+                    </a>
+
+                    <a href="/settings#extraction-fields" class="flex items-center gap-3 p-3 bg-surface-50 dark:bg-surface-800/50 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors">
+                        <div class="w-10 h-10 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-lg flex items-center justify-center">
+                            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                            </svg>
+                        </div>
+                        <div>
+                            <p class="text-sm font-medium text-surface-900 dark:text-white">Configure Fields</p>
+                            <p class="text-xs text-surface-500 dark:text-surface-400">Extraction settings</p>
+                        </div>
+                    </a>
+
+                    <a :href="paperlessUrl" target="_blank" class="flex items-center gap-3 p-3 bg-surface-50 dark:bg-surface-800/50 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors" x-show="paperlessUrl">
+                        <div class="w-10 h-10 bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg flex items-center justify-center">
+                            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                        </div>
+                        <div>
+                            <p class="text-sm font-medium text-surface-900 dark:text-white">Open Paperless</p>
+                            <p class="text-xs text-surface-500 dark:text-surface-400">View documents</p>
+                        </div>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Processing Statistics -->
+            <div class="card animate-fade-up stagger-8" style="opacity: 0;">
+                <div class="card-header border-b border-surface-100 dark:border-surface-800">
+                    <h2 class="section-title">Statistics</h2>
+                </div>
+                <div class="p-4 space-y-4">
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-surface-600 dark:text-surface-400">Total Processed</span>
+                        <span class="text-sm font-semibold text-surface-900 dark:text-white" x-text="stats.totalProcessed || 0"></span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-surface-600 dark:text-surface-400">Avg Confidence</span>
+                        <span class="text-sm font-semibold text-surface-900 dark:text-white" x-text="stats.avgConfidence ? stats.avgConfidence + '%' : '-'"></span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-surface-600 dark:text-surface-400">Success Rate</span>
+                        <span class="text-sm font-semibold" :class="stats.successRate >= 90 ? 'text-green-600' : 'text-amber-600'" x-text="stats.successRate ? stats.successRate + '%' : '-'"></span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-surface-600 dark:text-surface-400">Avg Processing Time</span>
+                        <span class="text-sm font-semibold text-surface-900 dark:text-white" x-text="stats.avgProcessingTime ? stats.avgProcessingTime + 's' : '-'"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function dashboardPage() {
+    return {
+        isLoading: true,
+        refreshInterval: null,
+        stats: {
+            processedToday: 0,
+            queued: 0,
+            processing: 0,
+            failed: 0,
+            totalProcessed: 0,
+            avgConfidence: null,
+            successRate: null,
+            avgProcessingTime: null
+        },
+        systemStatus: {
+            paperless: null,
+            ollama: null,
+            tesseract: null
+        },
+        paperlessUrl: null,
+        recentJobs: [],
+
+        get hasActiveJobs() {
+            return this.stats.processing > 0 || this.stats.queued > 0;
+        },
+
+        async loadData() {
+            try {
+                // Load data in parallel
+                const [jobsResponse, statusResponse, statsResponse] = await Promise.all([
+                    api.jobs.list({ page_size: 10 }),
+                    api.config.getStatus().catch(() => ({})),
+                    api.jobs.getStats().catch(() => ({}))
+                ]);
+
+                // Process jobs
+                this.recentJobs = jobsResponse.jobs || [];
+
+                // Calculate stats from jobs
+                const jobs = this.recentJobs;
+                this.stats.queued = jobs.filter(j => j.status === 'queued').length;
+                this.stats.processing = jobs.filter(j => j.status === 'processing').length;
+                this.stats.failed = jobs.filter(j => j.status === 'failed').length;
+
+                // Use stats from API if available
+                if (statsResponse) {
+                    this.stats.totalProcessed = statsResponse.total_completed || 0;
+                    this.stats.processedToday = statsResponse.completed_today || jobs.filter(j => j.status === 'completed').length;
+                    this.stats.avgConfidence = statsResponse.avg_confidence ? Math.round(statsResponse.avg_confidence * 100) : null;
+                    this.stats.avgProcessingTime = statsResponse.avg_processing_time_seconds ? Math.round(statsResponse.avg_processing_time_seconds) : null;
+
+                    // Calculate success rate
+                    const total = (statsResponse.total_completed || 0) + (statsResponse.total_failed || 0);
+                    this.stats.successRate = total > 0 ? Math.round((statsResponse.total_completed / total) * 100) : null;
+                }
+
+                // Process system status
+                if (statusResponse && statusResponse.services) {
+                    this.systemStatus = statusResponse.services;
+                    this.paperlessUrl = statusResponse.services.paperless?.url || null;
+                }
+
+            } catch (error) {
+                console.error('Failed to load dashboard:', error);
+                if (Alpine.store('toast')) {
+                    Alpine.store('toast').show('Failed to load dashboard', 'error');
+                }
+            } finally {
+                this.isLoading = false;
+            }
+        },
+
+        startAutoRefresh() {
+            // Auto-refresh every 5 seconds when there are active jobs
+            this.refreshInterval = setInterval(() => {
+                if (this.hasActiveJobs) {
+                    this.loadData();
+                }
+            }, 5000);
+        },
+
+        formatTimeAgo(dateString) {
+            if (!dateString) return '';
+            const date = new Date(dateString);
+            const now = new Date();
+            const seconds = Math.floor((now - date) / 1000);
+
+            if (seconds < 60) return 'Just now';
+            if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+            if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+            return Math.floor(seconds / 86400) + 'd ago';
+        },
+
+        getJobStatusClass(status) {
+            const classes = {
+                'processing': 'status-processing',
+                'queued': 'status-pending',
+                'completed': 'status-approved',
+                'failed': 'status-failed'
+            };
+            return classes[status] || 'badge-neutral';
+        },
+
+        // Cleanup on page leave
+        destroy() {
+            if (this.refreshInterval) {
+                clearInterval(this.refreshInterval);
+            }
+        }
+    };
+}
+</script>
+{% endblock %}

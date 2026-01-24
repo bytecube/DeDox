@@ -1,0 +1,154 @@
+# DeDox - Minimal Docker Compose
+# Use this if you already have Paperless-ngx running
+
+services:
+  # DeDox API Service
+  dedox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dedox
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    environment:
+      - DEDOX_CONFIG_DIR=/app/config
+      - DEDOX_JWT_SECRET=${DEDOX_JWT_SECRET:-change-me-in-production}
+      # DeDox admin user (auto-created on first startup)
+      - DEDOX_ADMIN_EMAIL=${DEDOX_ADMIN_EMAIL:-admin@example.com}
+      - DEDOX_ADMIN_PASSWORD=${DEDOX_ADMIN_PASSWORD:-changeme123}
+      - DEDOX_PAPERLESS_URL=${DEDOX_PAPERLESS_URL:-http://host.docker.internal:8080}
+      - DEDOX_PAPERLESS_TOKEN=${DEDOX_PAPERLESS_TOKEN:-}
+      - DEDOX_OLLAMA_URL=http://ollama:11434
+      # Paperless admin credentials for auto token generation (for external Paperless)
+      - PAPERLESS_ADMIN_USER=${PAPERLESS_ADMIN_USER:-admin}
+      - PAPERLESS_ADMIN_PASSWORD=${PAPERLESS_ADMIN_PASSWORD:-}
+      # Open WebUI credentials for auto API key generation
+      - DEDOX_OPENWEBUI_API_KEY=${DEDOX_OPENWEBUI_API_KEY:-}
+      - OPENWEBUI_ADMIN_EMAIL=${OPENWEBUI_ADMIN_EMAIL:-admin@example.com}
+      - OPENWEBUI_ADMIN_PASSWORD=${OPENWEBUI_ADMIN_PASSWORD:-admin}
+    depends_on:
+      ollama:
+        condition: service_healthy
+      open-webui:
+        condition: service_healthy
+    networks:
+      - dedox-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # DeDox Background Worker
+  dedox-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dedox-worker
+    restart: unless-stopped
+    command: ["python", "-m", "dedox.services.job_worker"]
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    environment:
+      - DEDOX_CONFIG_DIR=/app/config
+      - DEDOX_JWT_SECRET=${DEDOX_JWT_SECRET:-change-me-in-production}
+      - DEDOX_PAPERLESS_URL=${DEDOX_PAPERLESS_URL:-http://host.docker.internal:8080}
+      - DEDOX_PAPERLESS_TOKEN=${DEDOX_PAPERLESS_TOKEN:-}
+      - DEDOX_OLLAMA_URL=http://ollama:11434
+      # Paperless admin credentials for auto token generation (for external Paperless)
+      - PAPERLESS_ADMIN_USER=${PAPERLESS_ADMIN_USER:-admin}
+      - PAPERLESS_ADMIN_PASSWORD=${PAPERLESS_ADMIN_PASSWORD:-}
+      # Open WebUI credentials for auto API key generation
+      - DEDOX_OPENWEBUI_API_KEY=${DEDOX_OPENWEBUI_API_KEY:-}
+      - OPENWEBUI_ADMIN_EMAIL=${OPENWEBUI_ADMIN_EMAIL:-admin@example.com}
+      - OPENWEBUI_ADMIN_PASSWORD=${OPENWEBUI_ADMIN_PASSWORD:-admin}
+    depends_on:
+      - dedox
+      - ollama
+    networks:
+      - dedox-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # Ollama - Local LLM Server
+  ollama:
+    image: ollama/ollama:latest
+    container_name: dedox-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - dedox-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    # Uncomment if you have NVIDIA GPU
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Ollama Model Loader
+  ollama-pull:
+    image: ollama/ollama:latest
+    container_name: dedox-ollama-pull
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["sh", "-c", "OLLAMA_HOST=http://ollama:11434 ollama pull ${OLLAMA_MODEL:-qwen2.5:14b}"]
+    networks:
+      - dedox-network
+    restart: "no"
+
+  # Open WebUI - Document RAG and Chat Interface
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:cuda
+    container_name: dedox-openwebui
+    restart: unless-stopped
+    ports:
+      - "${OPENWEBUI_PORT:-3000}:8080"
+    volumes:
+      - openwebui-data:/app/backend/data
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - WEBUI_SECRET_KEY=${OPENWEBUI_SECRET_KEY:-change-me-in-production}
+      # Auto-create admin user on first startup
+      - WEBUI_ADMIN_NAME=Admin
+      - WEBUI_ADMIN_EMAIL=${OPENWEBUI_ADMIN_EMAIL:-admin@example.com}
+      - WEBUI_ADMIN_PASSWORD=${OPENWEBUI_ADMIN_PASSWORD:-admin}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - dedox-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+networks:
+  dedox-network:
+    driver: bridge
+
+volumes:
+  ollama-data:
+  openwebui-data:

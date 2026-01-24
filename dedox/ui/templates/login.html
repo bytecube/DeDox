@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block title %}Login{% endblock %}
+
+{% block layout %}
+<!-- Login page has its own layout without sidebar -->
+<div class="min-h-screen flex" x-data="loginPage()">
+    <!-- Left Panel - Branding (hidden on mobile) -->
+    <div class="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-surface-900 via-surface-800 to-primary-950 relative overflow-hidden">
+        <!-- Background pattern -->
+        <div class="absolute inset-0 opacity-10">
+            <svg class="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+                <defs>
+                    <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
+                        <path d="M 10 0 L 0 0 0 10" fill="none" stroke="currentColor" stroke-width="0.5"/>
+                    </pattern>
+                </defs>
+                <rect width="100" height="100" fill="url(#grid)" class="text-white"/>
+            </svg>
+        </div>
+
+        <!-- Content -->
+        <div class="relative z-10 flex flex-col justify-center px-12 lg:px-16 xl:px-20">
+            <!-- Logo -->
+            <div class="mb-8">
+                <div class="w-16 h-16 bg-gradient-to-br from-primary-400 to-primary-600 rounded-2xl flex items-center justify-center shadow-2xl shadow-primary-500/30">
+                    <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                </div>
+            </div>
+
+            <h1 class="text-4xl xl:text-5xl font-display font-bold text-white mb-4">
+                DeDox
+            </h1>
+            <p class="text-xl text-surface-300 mb-8 max-w-md">
+                Self-hosted document archive with intelligent OCR and metadata extraction.
+            </p>
+
+            <!-- Features list -->
+            <div class="space-y-4">
+                <div class="flex items-center gap-3 text-surface-300">
+                    <div class="w-8 h-8 rounded-lg bg-primary-500/20 flex items-center justify-center">
+                        <svg class="w-4 h-4 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <span>Smart document scanning</span>
+                </div>
+                <div class="flex items-center gap-3 text-surface-300">
+                    <div class="w-8 h-8 rounded-lg bg-primary-500/20 flex items-center justify-center">
+                        <svg class="w-4 h-4 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <span>AI-powered metadata extraction</span>
+                </div>
+                <div class="flex items-center gap-3 text-surface-300">
+                    <div class="w-8 h-8 rounded-lg bg-primary-500/20 flex items-center justify-center">
+                        <svg class="w-4 h-4 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <span>Paperless-ngx integration</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Decorative gradient orb -->
+        <div class="absolute -bottom-32 -right-32 w-96 h-96 bg-primary-500/20 rounded-full blur-3xl"></div>
+    </div>
+
+    <!-- Right Panel - Login Form -->
+    <div class="flex-1 flex items-center justify-center px-6 py-12 bg-surface-50 dark:bg-surface-950">
+        <div class="w-full max-w-sm">
+            <!-- Mobile Logo -->
+            <div class="lg:hidden text-center mb-8">
+                <div class="inline-flex items-center justify-center w-14 h-14 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl shadow-lg shadow-primary-500/20 mb-4">
+                    <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                </div>
+                <h1 class="text-2xl font-display font-bold text-surface-900 dark:text-white">DeDox</h1>
+            </div>
+
+            <!-- Welcome text -->
+            <div class="mb-8">
+                <h2 class="text-2xl font-display font-bold text-surface-900 dark:text-white">
+                    Welcome back
+                </h2>
+                <p class="text-surface-500 dark:text-surface-400 mt-1">
+                    Sign in to access your document archive
+                </p>
+            </div>
+
+            <!-- Error message -->
+            <div x-show="error" x-transition
+                 x-cloak
+                 class="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-lg">
+                <div class="flex gap-3">
+                    <svg class="w-5 h-5 text-red-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p class="text-sm text-red-600 dark:text-red-400" x-text="error"></p>
+                </div>
+            </div>
+
+            <!-- Login Form -->
+            <form @submit.prevent="login" class="space-y-5">
+                <div>
+                    <label class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Username</label>
+                    <input
+                        type="text"
+                        x-model="username"
+                        class="w-full px-4 py-2.5 bg-white dark:bg-surface-900 border border-surface-300 dark:border-surface-700 rounded-lg text-surface-900 dark:text-white placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
+                        placeholder="Enter your username"
+                        required
+                        autofocus
+                        autocomplete="username"
+                    >
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Password</label>
+                    <div class="relative">
+                        <input
+                            :type="showPassword ? 'text' : 'password'"
+                            x-model="password"
+                            class="w-full px-4 py-2.5 pr-12 bg-white dark:bg-surface-900 border border-surface-300 dark:border-surface-700 rounded-lg text-surface-900 dark:text-white placeholder-surface-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
+                            placeholder="Enter your password"
+                            required
+                            autocomplete="current-password"
+                        >
+                        <button
+                            type="button"
+                            @click="showPassword = !showPassword"
+                            class="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-surface-400 hover:text-surface-600 dark:hover:text-surface-300 transition-colors"
+                        >
+                            <svg x-show="!showPassword" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            </svg>
+                            <svg x-show="showPassword" x-cloak class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <button
+                    type="submit"
+                    class="w-full px-6 py-3 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow-md"
+                    :disabled="isLoading"
+                >
+                    <span x-show="!isLoading">Sign in</span>
+                    <span x-show="isLoading" x-cloak class="flex items-center justify-center">
+                        <svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Signing in...
+                    </span>
+                </button>
+            </form>
+
+            <!-- Footer -->
+            <p class="text-center text-sm text-surface-400 mt-8">
+                Self-hosted document archive system
+            </p>
+
+            <!-- Theme toggle -->
+            <div class="flex justify-center mt-6" x-data="{ dark: localStorage.getItem('darkMode') === 'true' }">
+                <button
+                    @click="dark = !dark; localStorage.setItem('darkMode', dark); document.documentElement.classList.toggle('dark', dark)"
+                    class="p-2 rounded-lg text-surface-400 hover:text-surface-600 dark:hover:text-surface-300 hover:bg-surface-200 dark:hover:bg-surface-800 transition-colors"
+                >
+                    <svg x-show="!dark" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                    </svg>
+                    <svg x-show="dark" x-cloak class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function loginPage() {
+    return {
+        username: '',
+        password: '',
+        showPassword: false,
+        isLoading: false,
+        error: null,
+
+        async login() {
+            this.error = null;
+            this.isLoading = true;
+
+            try {
+                const response = await api.auth.login(this.username, this.password);
+                window.location.href = '/';
+            } catch (error) {
+                this.error = error.message || 'Invalid username or password';
+            } finally {
+                this.isLoading = false;
+            }
+        }
+    };
+}
+</script>
+{% endblock %}

@@ -1,0 +1,864 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+
+{% block content %}
+<div x-data="settingsPage()" x-init="loadSettings()">
+    <!-- Page Header -->
+    <div class="page-header animate-fade-up">
+        <div>
+            <h1 class="page-title">Settings</h1>
+            <p class="page-subtitle">Configure your DeDox installation</p>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <!-- Sidebar Navigation (Desktop) -->
+        <div class="lg:col-span-1 animate-fade-up stagger-1">
+            <!-- Mobile Tab Selector -->
+            <div class="lg:hidden mb-4">
+                <select x-model="activeTab" class="input w-full">
+                    <option value="general">General</option>
+                    <option value="paperless">Paperless-ngx</option>
+                    <option value="llm">AI / LLM</option>
+                    <option value="ocr">OCR</option>
+                    <option value="users">Users</option>
+                    <option value="about">About</option>
+                </select>
+            </div>
+
+            <!-- Desktop Sidebar -->
+            <nav class="hidden lg:block card sticky top-4">
+                <div class="p-2 space-y-1">
+                    <button
+                        @click="activeTab = 'general'"
+                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all"
+                        :class="activeTab === 'general' ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 font-medium' : 'text-surface-600 dark:text-surface-400 hover:bg-surface-50 dark:hover:bg-surface-800'"
+                    >
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                        General
+                    </button>
+
+                    <button
+                        @click="activeTab = 'paperless'"
+                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all"
+                        :class="activeTab === 'paperless' ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 font-medium' : 'text-surface-600 dark:text-surface-400 hover:bg-surface-50 dark:hover:bg-surface-800'"
+                    >
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                        </svg>
+                        Paperless-ngx
+                        <span
+                            class="ml-auto w-2 h-2 rounded-full"
+                            :class="connectionStatus.paperless ? 'bg-green-500' : 'bg-surface-300 dark:bg-surface-600'"
+                        ></span>
+                    </button>
+
+                    <button
+                        @click="activeTab = 'llm'"
+                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all"
+                        :class="activeTab === 'llm' ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 font-medium' : 'text-surface-600 dark:text-surface-400 hover:bg-surface-50 dark:hover:bg-surface-800'"
+                    >
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                        </svg>
+                        AI / LLM
+                        <span
+                            class="ml-auto w-2 h-2 rounded-full"
+                            :class="connectionStatus.ollama ? 'bg-green-500' : 'bg-surface-300 dark:bg-surface-600'"
+                        ></span>
+                    </button>
+
+                    <button
+                        @click="activeTab = 'ocr'"
+                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all"
+                        :class="activeTab === 'ocr' ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 font-medium' : 'text-surface-600 dark:text-surface-400 hover:bg-surface-50 dark:hover:bg-surface-800'"
+                    >
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        OCR
+                    </button>
+
+                    <div class="my-2 border-t border-surface-100 dark:border-surface-800"></div>
+
+                    <button
+                        @click="activeTab = 'users'"
+                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all"
+                        :class="activeTab === 'users' ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 font-medium' : 'text-surface-600 dark:text-surface-400 hover:bg-surface-50 dark:hover:bg-surface-800'"
+                    >
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                        </svg>
+                        Users
+                    </button>
+
+                    <button
+                        @click="activeTab = 'about'"
+                        class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all"
+                        :class="activeTab === 'about' ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400 font-medium' : 'text-surface-600 dark:text-surface-400 hover:bg-surface-50 dark:hover:bg-surface-800'"
+                    >
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        About
+                    </button>
+                </div>
+            </nav>
+        </div>
+
+        <!-- Settings Content -->
+        <div class="lg:col-span-3 animate-fade-up stagger-2">
+            <!-- General Settings -->
+            <div x-show="activeTab === 'general'" x-transition class="space-y-6">
+                <div class="card">
+                    <div class="card-body border-b border-surface-100 dark:border-surface-800">
+                        <div class="section-header">
+                            <h2 class="section-title">General Settings</h2>
+                            <p class="section-subtitle">Basic configuration options for DeDox</p>
+                        </div>
+                    </div>
+                    <div class="card-body space-y-6">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                            <div>
+                                <label class="label">Default Language</label>
+                                <select x-model="settings.default_language" class="input">
+                                    <option value="de">German (Deutsch)</option>
+                                    <option value="en">English</option>
+                                </select>
+                                <p class="text-xs text-surface-500 mt-1">Used for document processing and metadata</p>
+                            </div>
+
+                            <div>
+                                <label class="label">Date Format</label>
+                                <select x-model="settings.date_format" class="input">
+                                    <option value="DD.MM.YYYY">DD.MM.YYYY (31.12.2024)</option>
+                                    <option value="YYYY-MM-DD">YYYY-MM-DD (2024-12-31)</option>
+                                    <option value="MM/DD/YYYY">MM/DD/YYYY (12/31/2024)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center justify-between py-4 border-t border-surface-100 dark:border-surface-800">
+                            <div>
+                                <p class="font-medium text-surface-900 dark:text-white">Auto-approve low-risk documents</p>
+                                <p class="text-sm text-surface-500 mt-0.5">Automatically approve documents with high confidence scores</p>
+                            </div>
+                            <button
+                                @click="settings.auto_approve = !settings.auto_approve"
+                                type="button"
+                                class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2"
+                                :class="settings.auto_approve ? 'bg-primary-600' : 'bg-surface-200 dark:bg-surface-700'"
+                                role="switch"
+                                :aria-checked="settings.auto_approve"
+                            >
+                                <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="settings.auto_approve ? 'translate-x-5' : 'translate-x-0'"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Save Button -->
+                <div class="flex justify-end">
+                    <button @click="saveSettings" class="btn btn-primary" :disabled="isSaving">
+                        <template x-if="!isSaving">
+                            <span class="flex items-center">
+                                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                </svg>
+                                Save Settings
+                            </span>
+                        </template>
+                        <template x-if="isSaving">
+                            <span class="flex items-center">
+                                <svg class="animate-spin w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Saving...
+                            </span>
+                        </template>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Paperless Settings -->
+            <div x-show="activeTab === 'paperless'" x-transition class="space-y-6">
+                <div class="card">
+                    <div class="card-body border-b border-surface-100 dark:border-surface-800">
+                        <div class="flex items-start justify-between">
+                            <div class="section-header">
+                                <h2 class="section-title">Paperless-ngx Connection</h2>
+                                <p class="section-subtitle">Configure your Paperless-ngx instance for document archival</p>
+                            </div>
+                            <span
+                                class="badge"
+                                :class="connectionStatus.paperless ? 'status-approved' : 'status-failed'"
+                                x-text="connectionStatus.paperless ? 'Connected' : 'Disconnected'"
+                            ></span>
+                        </div>
+                    </div>
+                    <div class="card-body space-y-6">
+                        <div>
+                            <label class="label">Paperless URL</label>
+                            <input
+                                type="url"
+                                x-model="settings.paperless_url"
+                                class="input"
+                                placeholder="https://paperless.example.com"
+                            >
+                            <p class="text-xs text-surface-500 mt-1">The URL of your Paperless-ngx instance</p>
+                        </div>
+
+                        <div>
+                            <label class="label">API Token</label>
+                            <div class="relative">
+                                <input
+                                    :type="showApiToken ? 'text' : 'password'"
+                                    x-model="settings.paperless_token"
+                                    class="input pr-20 font-mono"
+                                    placeholder="Enter your API token"
+                                >
+                                <button
+                                    @click="showApiToken = !showApiToken"
+                                    type="button"
+                                    class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-primary-600 hover:text-primary-700 font-medium"
+                                    x-text="showApiToken ? 'Hide' : 'Show'"
+                                ></button>
+                            </div>
+                            <p class="text-xs text-surface-500 mt-1">Find this in Paperless Settings > API Token</p>
+                        </div>
+
+                        <div class="pt-4 border-t border-surface-100 dark:border-surface-800">
+                            <button @click="testPaperlessConnection" class="btn btn-secondary" :disabled="isTesting">
+                                <template x-if="!isTesting">
+                                    <span class="flex items-center">
+                                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                        </svg>
+                                        Test Connection
+                                    </span>
+                                </template>
+                                <template x-if="isTesting">
+                                    <span class="flex items-center">
+                                        <svg class="animate-spin w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24">
+                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                        Testing...
+                                    </span>
+                                </template>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Reprocessing Configuration -->
+                <div class="card">
+                    <div class="card-body border-b border-surface-100 dark:border-surface-800">
+                        <div class="section-header">
+                            <h2 class="section-title">Reprocessing</h2>
+                            <p class="section-subtitle">Configure tag-based reprocessing trigger</p>
+                        </div>
+                    </div>
+                    <div class="card-body space-y-6">
+                        <div>
+                            <label class="label">Reprocess Tag</label>
+                            <input
+                                type="text"
+                                x-model="settings.reprocess_tag"
+                                class="input font-mono"
+                                placeholder="dedox:reprocess"
+                            >
+                            <p class="text-xs text-surface-500 mt-1">Add this tag to a document in Paperless to trigger DeDox reprocessing</p>
+                        </div>
+
+                        <div class="p-4 bg-surface-50 dark:bg-surface-800 rounded-xl">
+                            <h4 class="text-sm font-medium text-surface-900 dark:text-white mb-2">How to trigger reprocessing:</h4>
+                            <ol class="text-sm text-surface-600 dark:text-surface-400 list-decimal list-inside space-y-1">
+                                <li>In Paperless-ngx, add the tag <code class="px-1 bg-surface-200 dark:bg-surface-700 rounded" x-text="settings.reprocess_tag || 'dedox:reprocess'"></code> to any document</li>
+                                <li>If you have a workflow configured for document updates, DeDox will automatically reprocess the document</li>
+                                <li>The tag will be removed automatically and replaced with the processing/enhanced tag</li>
+                            </ol>
+                        </div>
+
+                        <!-- Workflow Status and Setup -->
+                        <div class="pt-4 border-t border-surface-100 dark:border-surface-800">
+                            <div class="flex items-center justify-between mb-4">
+                                <div>
+                                    <h4 class="text-sm font-medium text-surface-900 dark:text-white">Reprocess Workflow</h4>
+                                    <p class="text-xs text-surface-500 mt-0.5">Automatically triggers reprocessing when you add the reprocess tag</p>
+                                </div>
+                                <span
+                                    class="badge"
+                                    :class="reprocessWorkflowConfigured ? 'status-approved' : 'status-pending'"
+                                    x-text="reprocessWorkflowConfigured ? 'Configured' : 'Not Configured'"
+                                ></span>
+                            </div>
+
+                            <div x-show="!reprocessWorkflowConfigured" class="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl mb-4">
+                                <div class="flex items-start gap-3">
+                                    <svg class="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    <div>
+                                        <p class="text-sm font-medium text-amber-800 dark:text-amber-300">Workflow Not Configured</p>
+                                        <p class="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                                            Click "Setup Workflow" to automatically create the Paperless workflow for reprocessing.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div x-show="reprocessWorkflowConfigured" class="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl mb-4">
+                                <div class="flex items-start gap-3">
+                                    <svg class="w-5 h-5 text-green-600 dark:text-green-400 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                    <div>
+                                        <p class="text-sm font-medium text-green-800 dark:text-green-300">Workflow Active</p>
+                                        <p class="text-xs text-green-700 dark:text-green-400 mt-1">
+                                            Reprocessing is enabled. Add the <code class="px-1 bg-green-100 dark:bg-green-800 rounded" x-text="settings.reprocess_tag || 'dedox:reprocess'"></code> tag to any document to trigger reprocessing.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="flex gap-2">
+                                <button
+                                    @click="setupReprocessWorkflow()"
+                                    class="btn btn-primary"
+                                    :disabled="isSettingUpReprocessWorkflow"
+                                    x-show="!reprocessWorkflowConfigured"
+                                >
+                                    <template x-if="!isSettingUpReprocessWorkflow">
+                                        <span class="flex items-center">
+                                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                            </svg>
+                                            Setup Workflow
+                                        </span>
+                                    </template>
+                                    <template x-if="isSettingUpReprocessWorkflow">
+                                        <span class="flex items-center">
+                                            <svg class="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                            </svg>
+                                            Setting up...
+                                        </span>
+                                    </template>
+                                </button>
+                                <button
+                                    @click="removeReprocessWorkflow()"
+                                    class="btn btn-danger"
+                                    :disabled="isRemovingReprocessWorkflow"
+                                    x-show="reprocessWorkflowConfigured"
+                                >
+                                    <template x-if="!isRemovingReprocessWorkflow">
+                                        <span class="flex items-center">
+                                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                            Remove Workflow
+                                        </span>
+                                    </template>
+                                    <template x-if="isRemovingReprocessWorkflow">
+                                        <span class="flex items-center">
+                                            <svg class="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                            </svg>
+                                            Removing...
+                                        </span>
+                                    </template>
+                                </button>
+                                <button
+                                    @click="checkReprocessWorkflowStatus()"
+                                    class="btn btn-secondary"
+                                    :disabled="isCheckingReprocessWorkflow"
+                                >
+                                    <svg class="w-4 h-4 mr-2" :class="isCheckingReprocessWorkflow ? 'animate-spin' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                    Refresh Status
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-end">
+                    <button @click="saveSettings" class="btn btn-primary" :disabled="isSaving">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                        </svg>
+                        Save Settings
+                    </button>
+                </div>
+            </div>
+
+            <!-- LLM Settings -->
+            <div x-show="activeTab === 'llm'" x-transition class="space-y-6">
+                <div class="card">
+                    <div class="card-body border-b border-surface-100 dark:border-surface-800">
+                        <div class="flex items-start justify-between">
+                            <div class="section-header">
+                                <h2 class="section-title">AI / LLM Configuration</h2>
+                                <p class="section-subtitle">Configure the local language model for metadata extraction</p>
+                            </div>
+                            <span
+                                class="badge"
+                                :class="connectionStatus.ollama ? 'status-approved' : 'status-failed'"
+                                x-text="connectionStatus.ollama ? 'Online' : 'Offline'"
+                            ></span>
+                        </div>
+                    </div>
+                    <div class="card-body space-y-6">
+                        <div>
+                            <label class="label">Ollama URL</label>
+                            <input
+                                type="url"
+                                x-model="settings.ollama_url"
+                                class="input"
+                                placeholder="http://localhost:11434"
+                            >
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                            <div>
+                                <label class="label">Model</label>
+                                <select x-model="settings.llm_model" class="input">
+                                    <option value="qwen2.5:14b">Qwen 2.5 14B</option>
+                                    <option value="llama3.2">Llama 3.2</option>
+                                    <option value="llama3.1">Llama 3.1</option>
+                                    <option value="mistral">Mistral</option>
+                                    <option value="mixtral">Mixtral</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label class="label">Embedding Model</label>
+                                <input
+                                    type="text"
+                                    x-model="settings.embedding_model"
+                                    class="input font-mono text-sm"
+                                    placeholder="paraphrase-multilingual-MiniLM-L12-v2"
+                                >
+                            </div>
+                        </div>
+
+                        <div class="pt-4 border-t border-surface-100 dark:border-surface-800">
+                            <button @click="testOllamaConnection" class="btn btn-secondary" :disabled="isTesting">
+                                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                </svg>
+                                Test Connection
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-end">
+                    <button @click="saveSettings" class="btn btn-primary" :disabled="isSaving">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                        </svg>
+                        Save Settings
+                    </button>
+                </div>
+            </div>
+
+            <!-- OCR Settings -->
+            <div x-show="activeTab === 'ocr'" x-transition class="space-y-6">
+                <div class="card">
+                    <div class="card-body border-b border-surface-100 dark:border-surface-800">
+                        <div class="section-header">
+                            <h2 class="section-title">OCR Settings</h2>
+                            <p class="section-subtitle">Configure text recognition and image processing</p>
+                        </div>
+                    </div>
+                    <div class="card-body space-y-6">
+                        <div>
+                            <label class="label">OCR Languages</label>
+                            <div class="flex flex-wrap gap-4 mt-2">
+                                <label class="flex items-center gap-2 cursor-pointer group">
+                                    <input
+                                        type="checkbox"
+                                        value="deu"
+                                        x-model="settings.ocr_languages"
+                                        class="w-4 h-4 rounded border-surface-300 dark:border-surface-600 text-primary-600 focus:ring-primary-500"
+                                    >
+                                    <span class="text-sm text-surface-700 dark:text-surface-300 group-hover:text-surface-900 dark:group-hover:text-white transition-colors">German</span>
+                                </label>
+                                <label class="flex items-center gap-2 cursor-pointer group">
+                                    <input
+                                        type="checkbox"
+                                        value="eng"
+                                        x-model="settings.ocr_languages"
+                                        class="w-4 h-4 rounded border-surface-300 dark:border-surface-600 text-primary-600 focus:ring-primary-500"
+                                    >
+                                    <span class="text-sm text-surface-700 dark:text-surface-300 group-hover:text-surface-900 dark:group-hover:text-white transition-colors">English</span>
+                                </label>
+                                <label class="flex items-center gap-2 cursor-pointer group">
+                                    <input
+                                        type="checkbox"
+                                        value="fra"
+                                        x-model="settings.ocr_languages"
+                                        class="w-4 h-4 rounded border-surface-300 dark:border-surface-600 text-primary-600 focus:ring-primary-500"
+                                    >
+                                    <span class="text-sm text-surface-700 dark:text-surface-300 group-hover:text-surface-900 dark:group-hover:text-white transition-colors">French</span>
+                                </label>
+                            </div>
+                            <p class="text-xs text-surface-500 mt-2">Select the languages present in your documents</p>
+                        </div>
+
+                        <div>
+                            <label class="label">OCR Engine</label>
+                            <select x-model="settings.ocr_engine" class="input max-w-xs">
+                                <option value="tesseract">Tesseract OCR</option>
+                            </select>
+                        </div>
+
+                        <div class="flex items-center justify-between py-4 border-t border-surface-100 dark:border-surface-800">
+                            <div>
+                                <p class="font-medium text-surface-900 dark:text-white">Auto-rotate images</p>
+                                <p class="text-sm text-surface-500 mt-0.5">Automatically correct image orientation before OCR</p>
+                            </div>
+                            <button
+                                @click="settings.auto_rotate = !settings.auto_rotate"
+                                type="button"
+                                class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2"
+                                :class="settings.auto_rotate ? 'bg-primary-600' : 'bg-surface-200 dark:bg-surface-700'"
+                                role="switch"
+                            >
+                                <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="settings.auto_rotate ? 'translate-x-5' : 'translate-x-0'"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-end">
+                    <button @click="saveSettings" class="btn btn-primary" :disabled="isSaving">
+                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                        </svg>
+                        Save Settings
+                    </button>
+                </div>
+            </div>
+
+            <!-- User Management -->
+            <div x-show="activeTab === 'users'" x-transition class="space-y-6">
+                <div class="card">
+                    <div class="card-body border-b border-surface-100 dark:border-surface-800">
+                        <div class="flex items-start justify-between">
+                            <div class="section-header">
+                                <h2 class="section-title">User Management</h2>
+                                <p class="section-subtitle">Manage user accounts and permissions</p>
+                            </div>
+                            <button @click="showAddUserModal = true" class="btn btn-primary btn-sm">
+                                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                                </svg>
+                                Add User
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Users Table -->
+                    <div class="divide-y divide-surface-100 dark:divide-surface-800">
+                        <template x-for="user in users" :key="user.id">
+                            <div class="flex items-center justify-between p-4 hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors">
+                                <div class="flex items-center gap-4">
+                                    <div class="w-10 h-10 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white font-semibold">
+                                        <span x-text="user.username.charAt(0).toUpperCase()"></span>
+                                    </div>
+                                    <div>
+                                        <p class="font-medium text-surface-900 dark:text-white" x-text="user.username"></p>
+                                        <div class="flex items-center gap-2 mt-0.5">
+                                            <span
+                                                class="badge text-xs"
+                                                :class="user.is_admin ? 'badge-primary' : 'badge-secondary'"
+                                                x-text="user.is_admin ? 'Administrator' : 'User'"
+                                            ></span>
+                                            <span
+                                                class="badge text-xs"
+                                                :class="user.is_active ? 'status-approved' : 'status-failed'"
+                                                x-text="user.is_active ? 'Active' : 'Inactive'"
+                                            ></span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <button class="btn btn-secondary btn-sm">
+                                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                        </svg>
+                                        Edit
+                                    </button>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- Empty State -->
+                        <div x-show="users.length === 0" class="p-8">
+                            <div class="empty-state">
+                                <div class="empty-state-icon">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                                    </svg>
+                                </div>
+                                <p class="empty-state-title">No users yet</p>
+                                <p class="empty-state-text">Add a user to get started</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- About -->
+            <div x-show="activeTab === 'about'" x-transition class="space-y-6">
+                <div class="card">
+                    <div class="card-body">
+                        <!-- Logo and Title -->
+                        <div class="text-center py-8">
+                            <div class="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-primary-400 to-primary-600 rounded-2xl shadow-xl shadow-primary-500/25 mb-6">
+                                <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                            </div>
+                            <h3 class="text-3xl font-display font-bold text-surface-900 dark:text-white">DeDox</h3>
+                            <p class="text-surface-500 mt-2">Self-hosted Document Archive System</p>
+                            <span class="inline-block mt-3 px-3 py-1 bg-surface-100 dark:bg-surface-800 rounded-full text-sm font-mono text-surface-600 dark:text-surface-400">v1.0.0</span>
+                        </div>
+
+                        <!-- System Info -->
+                        <div class="max-w-md mx-auto space-y-3 py-6 border-t border-surface-100 dark:border-surface-800">
+                            <div class="flex items-center justify-between py-2">
+                                <span class="text-surface-500">Python</span>
+                                <span class="font-mono text-sm text-surface-900 dark:text-white">3.11</span>
+                            </div>
+                            <div class="flex items-center justify-between py-2">
+                                <span class="text-surface-500">FastAPI</span>
+                                <span class="font-mono text-sm text-surface-900 dark:text-white">0.109+</span>
+                            </div>
+                            <div class="flex items-center justify-between py-2">
+                                <span class="text-surface-500">Tesseract OCR</span>
+                                <span class="font-mono text-sm text-surface-900 dark:text-white">5.x</span>
+                            </div>
+                            <div class="flex items-center justify-between py-2">
+                                <span class="text-surface-500">Database</span>
+                                <span class="font-mono text-sm text-surface-900 dark:text-white">SQLite</span>
+                            </div>
+                        </div>
+
+                        <!-- Footer Message -->
+                        <div class="text-center py-6 border-t border-surface-100 dark:border-surface-800">
+                            <div class="inline-flex items-center gap-2 text-surface-500">
+                                <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                                </svg>
+                                <span class="text-sm">100% local and offline</span>
+                            </div>
+                            <p class="text-sm text-surface-400 mt-1">Your data stays with you</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function settingsPage() {
+    return {
+        activeTab: 'general',
+        isLoading: true,
+        isSaving: false,
+        isTesting: false,
+        showApiToken: false,
+        showAddUserModal: false,
+
+        settings: {
+            default_language: 'de',
+            date_format: 'DD.MM.YYYY',
+            auto_approve: false,
+            paperless_url: '',
+            paperless_token: '',
+            ollama_url: 'http://localhost:11434',
+            llm_model: 'qwen2.5:14b',
+            embedding_model: 'paraphrase-multilingual-MiniLM-L12-v2',
+            ocr_languages: ['deu', 'eng'],
+            ocr_engine: 'tesseract',
+            auto_rotate: true
+        },
+
+        connectionStatus: {
+            paperless: false,
+            ollama: false
+        },
+
+        users: [],
+
+        // Reprocess workflow state
+        reprocessWorkflowConfigured: false,
+        isSettingUpReprocessWorkflow: false,
+        isRemovingReprocessWorkflow: false,
+        isCheckingReprocessWorkflow: false,
+
+        async loadSettings() {
+            try {
+                const config = await api.config.get();
+                if (config) {
+                    this.settings = { ...this.settings, ...config };
+                }
+
+                // Load users
+                this.users = [
+                    { id: 1, username: 'admin', is_admin: true, is_active: true }
+                ];
+
+                // Check reprocess workflow status
+                await this.checkReprocessWorkflowStatus();
+
+            } catch (error) {
+                console.error('Failed to load settings:', error);
+            } finally {
+                this.isLoading = false;
+            }
+        },
+
+        async saveSettings() {
+            this.isSaving = true;
+
+            try {
+                await api.config.update(this.settings);
+                Alpine.store('toast').show('Settings saved', 'success');
+            } catch (error) {
+                Alpine.store('toast').show('Failed to save settings', 'error');
+            } finally {
+                this.isSaving = false;
+            }
+        },
+
+        async testPaperlessConnection() {
+            this.isTesting = true;
+
+            try {
+                const result = await api.config.testPaperless();
+                this.connectionStatus.paperless = result.status === 'connected';
+                Alpine.store('toast').show(
+                    result.status === 'connected' ? 'Paperless connection successful' : 'Connection failed',
+                    result.status === 'connected' ? 'success' : 'error'
+                );
+            } catch (error) {
+                this.connectionStatus.paperless = false;
+                Alpine.store('toast').show('Connection failed: ' + error.message, 'error');
+            } finally {
+                this.isTesting = false;
+            }
+        },
+
+        async testOllamaConnection() {
+            this.isTesting = true;
+
+            try {
+                const result = await api.config.testOllama();
+                this.connectionStatus.ollama = result.status === 'connected';
+                Alpine.store('toast').show(
+                    result.status === 'connected' ? 'Ollama connection successful' : 'Connection failed',
+                    result.status === 'connected' ? 'success' : 'error'
+                );
+            } catch (error) {
+                this.connectionStatus.ollama = false;
+                Alpine.store('toast').show('Connection failed: ' + error.message, 'error');
+            } finally {
+                this.isTesting = false;
+            }
+        },
+
+        // Reprocess workflow methods
+        async checkReprocessWorkflowStatus() {
+            this.isCheckingReprocessWorkflow = true;
+            try {
+                const response = await fetch('/api/admin/paperless-status', {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                });
+                if (response.ok) {
+                    const status = await response.json();
+                    this.reprocessWorkflowConfigured = status.reprocess_workflow_configured || false;
+                }
+            } catch (error) {
+                console.error('Failed to check reprocess workflow status:', error);
+            } finally {
+                this.isCheckingReprocessWorkflow = false;
+            }
+        },
+
+        async setupReprocessWorkflow() {
+            this.isSettingUpReprocessWorkflow = true;
+            try {
+                const response = await fetch('/api/admin/setup-reprocess-workflow', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ force: false })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    this.reprocessWorkflowConfigured = true;
+                    Alpine.store('toast').show(
+                        result.already_exists
+                            ? 'Reprocess workflow already configured'
+                            : 'Reprocess workflow created successfully',
+                        'success'
+                    );
+                } else {
+                    Alpine.store('toast').show('Failed to setup workflow: ' + (result.error || result.message), 'error');
+                }
+            } catch (error) {
+                Alpine.store('toast').show('Failed to setup workflow: ' + error.message, 'error');
+            } finally {
+                this.isSettingUpReprocessWorkflow = false;
+            }
+        },
+
+        async removeReprocessWorkflow() {
+            if (!confirm('Are you sure you want to remove the reprocess workflow?')) {
+                return;
+            }
+
+            this.isRemovingReprocessWorkflow = true;
+            try {
+                const response = await fetch('/api/admin/setup-reprocess-workflow', {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    this.reprocessWorkflowConfigured = false;
+                    Alpine.store('toast').show('Reprocess workflow removed', 'success');
+                } else {
+                    Alpine.store('toast').show('Failed to remove workflow: ' + (result.error || result.message), 'error');
+                }
+            } catch (error) {
+                Alpine.store('toast').show('Failed to remove workflow: ' + error.message, 'error');
+            } finally {
+                this.isRemovingReprocessWorkflow = false;
+            }
+        }
+    };
+}
+</script>
+{% endblock %}

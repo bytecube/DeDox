@@ -1,0 +1,659 @@
+{% extends "base.html" %}
+{% block title %}Processing Jobs{% endblock %}
+
+{% block content %}
+<div x-data="jobsPage()" x-init="init()">
+    <!-- Page Header -->
+    <div class="page-header animate-fade-up">
+        <div>
+            <h1 class="page-title">Processing Jobs</h1>
+            <p class="page-subtitle">Monitor document processing pipeline status</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <!-- Auto-refresh indicator -->
+            <div
+                x-show="stats.queued > 0 || stats.processing > 0"
+                class="flex items-center gap-2 text-sm text-surface-500"
+            >
+                <span class="w-2 h-2 bg-primary-500 rounded-full animate-pulse"></span>
+                Auto-refreshing
+            </div>
+            <button @click="loadJobs" class="btn btn-secondary" :disabled="isLoading">
+                <svg class="w-4 h-4 mr-2" :class="{'animate-spin': isLoading}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- Stats Row -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6 animate-fade-up stagger-1">
+        <div class="stat-card">
+            <div class="stat-icon stat-icon-pending">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+            </div>
+            <div>
+                <p class="stat-value" x-text="stats.queued">0</p>
+                <p class="stat-label">Queued</p>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon stat-icon-processing">
+                <svg class="w-5 h-5" :class="{'animate-spin': stats.processing > 0}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+            </div>
+            <div>
+                <p class="stat-value" x-text="stats.processing">0</p>
+                <p class="stat-label">Processing</p>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon stat-icon-approved">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+            </div>
+            <div>
+                <p class="stat-value" x-text="stats.completed">0</p>
+                <p class="stat-label">Completed</p>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon stat-icon-failed">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+            </div>
+            <div>
+                <p class="stat-value" x-text="stats.failed">0</p>
+                <p class="stat-label">Failed</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter Tabs -->
+    <div class="mb-6 animate-fade-up stagger-2">
+        <div class="tabs inline-flex">
+            <button
+                @click="filter = 'all'"
+                class="tab"
+                :class="{ 'tab-active': filter === 'all' }"
+            >
+                All
+                <span class="ml-1.5 text-xs px-1.5 py-0.5 rounded-full bg-surface-200 dark:bg-surface-700" x-text="jobs.length"></span>
+            </button>
+            <button
+                @click="filter = 'active'"
+                class="tab"
+                :class="{ 'tab-active': filter === 'active' }"
+            >
+                Active
+                <span
+                    x-show="stats.queued + stats.processing > 0"
+                    class="ml-1.5 text-xs px-1.5 py-0.5 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300"
+                    x-text="stats.queued + stats.processing"
+                ></span>
+            </button>
+            <button
+                @click="filter = 'completed'"
+                class="tab"
+                :class="{ 'tab-active': filter === 'completed' }"
+            >
+                Completed
+            </button>
+            <button
+                @click="filter = 'failed'"
+                class="tab"
+                :class="{ 'tab-active': filter === 'failed' }"
+            >
+                Failed
+                <span
+                    x-show="stats.failed > 0"
+                    class="ml-1.5 text-xs px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300"
+                    x-text="stats.failed"
+                ></span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Jobs List -->
+    <div class="space-y-4">
+        <template x-for="(job, index) in filteredJobs" :key="job.id">
+            <div
+                class="card animate-fade-up"
+                :class="{ 'border-l-4 border-l-red-500': job.status === 'failed', 'ring-2 ring-primary-500 ring-offset-2 dark:ring-offset-surface-900': window.highlightJobId === job.id }"
+                :style="'animation-delay: ' + (index * 50) + 'ms'"
+                x-data="{ expanded: false, showLogs: false, logs: [], logsLoading: false }"
+                x-init="if (window.highlightJobId === job.id) { expanded = true; $nextTick(() => $el.scrollIntoView({ behavior: 'smooth', block: 'center' })); }"
+                :id="'job-' + job.id"
+            >
+                <div class="card-body">
+                    <!-- Header Row -->
+                    <div class="flex flex-col lg:flex-row lg:items-start gap-4">
+                        <!-- Job Info -->
+                        <div class="flex items-start gap-4 flex-1 min-w-0">
+                            <!-- Status Icon -->
+                            <div
+                                class="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
+                                :class="{
+                                    'bg-amber-100 dark:bg-amber-900/30': job.status === 'queued',
+                                    'bg-blue-100 dark:bg-blue-900/30': job.status === 'processing',
+                                    'bg-green-100 dark:bg-green-900/30': job.status === 'completed',
+                                    'bg-red-100 dark:bg-red-900/30': job.status === 'failed'
+                                }"
+                            >
+                                <svg
+                                    x-show="job.status === 'queued'"
+                                    class="w-6 h-6 text-amber-600 dark:text-amber-400"
+                                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                >
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <svg
+                                    x-show="job.status === 'processing'"
+                                    class="w-6 h-6 text-blue-600 dark:text-blue-400 animate-spin"
+                                    fill="none" viewBox="0 0 24 24"
+                                >
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                </svg>
+                                <svg
+                                    x-show="job.status === 'completed'"
+                                    class="w-6 h-6 text-green-600 dark:text-green-400"
+                                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                >
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                </svg>
+                                <svg
+                                    x-show="job.status === 'failed'"
+                                    class="w-6 h-6 text-red-600 dark:text-red-400"
+                                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                >
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </div>
+
+                            <!-- Details -->
+                            <div class="min-w-0 flex-1">
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <h3 class="font-semibold text-surface-900 dark:text-white">
+                                        <span x-show="job.document_filename" x-text="job.document_filename"></span>
+                                        <span x-show="!job.document_filename">Job <span class="font-mono text-sm text-surface-500" x-text="'#' + job.id.slice(0, 8)"></span></span>
+                                    </h3>
+                                    <span
+                                        class="badge text-xs"
+                                        :class="getStatusClass(job.status)"
+                                        x-text="job.status"
+                                    ></span>
+                                </div>
+                                <p class="text-sm text-surface-500 mt-1">
+                                    <span x-show="job.document_filename" class="font-mono text-xs mr-2" x-text="'#' + job.id.slice(0, 8)"></span>
+                                    Started: <span x-text="formatDateTime(job.created_at)"></span>
+                                    <span x-show="job.completed_at" class="ml-2">
+                                        | Duration: <span class="font-mono" x-text="formatDuration(job.created_at, job.completed_at)"></span>
+                                    </span>
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Actions -->
+                        <div class="flex items-center gap-2 shrink-0">
+                            <button
+                                @click="expanded = !expanded"
+                                class="btn btn-secondary btn-sm"
+                            >
+                                <svg class="w-4 h-4 mr-1 transition-transform" :class="{'rotate-180': expanded}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                                </svg>
+                                Details
+                            </button>
+                            <button
+                                x-show="job.status === 'failed'"
+                                @click="$parent.retryJob(job.id)"
+                                class="btn btn-secondary btn-sm"
+                            >
+                                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                                Retry
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Pipeline Progress -->
+                    <div class="mt-4">
+                        <!-- Visual Pipeline -->
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-sm font-medium text-surface-700 dark:text-surface-300" x-text="job.current_stage || 'Waiting...'"></span>
+                            <span class="text-sm font-mono text-surface-500" x-text="(job.progress || 0) + '%'"></span>
+                        </div>
+                        <div class="progress h-2 mb-4">
+                            <div
+                                class="progress-bar transition-all duration-500"
+                                :class="job.status === 'failed' ? 'bg-red-500' : ''"
+                                :style="'width: ' + (job.progress || 0) + '%'"
+                            ></div>
+                        </div>
+
+                        <!-- Stage Icons -->
+                        <div class="flex items-start px-2">
+                            <template x-for="(stage, stageIndex) in pipelineStages" :key="stage.id">
+                                <div class="flex items-start" :class="stageIndex < pipelineStages.length - 1 ? 'flex-1' : ''">
+                                    <!-- Stage Circle + Label Column -->
+                                    <div class="flex flex-col items-center shrink-0">
+                                        <!-- Stage Icon -->
+                                        <div
+                                            class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all"
+                                            :class="{
+                                                'bg-green-500 text-white': isStageCompleted(job, stage.id),
+                                                'bg-blue-500 text-white animate-pulse': isStageRunning(job, stage.id),
+                                                'bg-red-500 text-white': isStageError(job, stage.id),
+                                                'bg-amber-500 text-white': isStageSkipped(job, stage.id),
+                                                'bg-surface-200 dark:bg-surface-700 text-surface-500': !isStageCompleted(job, stage.id) && !isStageRunning(job, stage.id) && !isStageError(job, stage.id) && !isStageSkipped(job, stage.id)
+                                            }"
+                                        >
+                                            <svg x-show="isStageCompleted(job, stage.id)" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                            </svg>
+                                            <svg x-show="isStageRunning(job, stage.id)" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                            </svg>
+                                            <svg x-show="isStageError(job, stage.id)" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                            <!-- Skip icon (forward arrow) -->
+                                            <svg x-show="isStageSkipped(job, stage.id)" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                                            </svg>
+                                            <span x-show="!isStageCompleted(job, stage.id) && !isStageRunning(job, stage.id) && !isStageError(job, stage.id) && !isStageSkipped(job, stage.id)" x-text="stageIndex + 1"></span>
+                                        </div>
+                                        <!-- Stage Label -->
+                                        <span class="text-xs text-surface-500 mt-1 text-center whitespace-nowrap" x-text="stage.label"></span>
+                                    </div>
+                                    <!-- Connector Line -->
+                                    <div
+                                        x-show="stageIndex < pipelineStages.length - 1"
+                                        class="flex-1 h-0.5 mt-4 mx-1"
+                                        :class="{
+                                            'bg-green-500': isStageCompleted(job, stage.id),
+                                            'bg-amber-500': isStageSkipped(job, stage.id),
+                                            'bg-surface-200 dark:bg-surface-700': !isStageCompleted(job, stage.id) && !isStageSkipped(job, stage.id)
+                                        }"
+                                    ></div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Expanded Details -->
+                    <div x-show="expanded" x-collapse class="mt-4 pt-4 border-t border-surface-100 dark:border-surface-800">
+                        <!-- Stage Details Table -->
+                        <div class="mb-4">
+                            <h4 class="text-sm font-semibold text-surface-700 dark:text-surface-300 mb-2">Stage Details</h4>
+                            <div class="bg-surface-50 dark:bg-surface-800/50 rounded-lg overflow-hidden">
+                                <table class="w-full text-sm">
+                                    <thead>
+                                        <tr class="border-b border-surface-200 dark:border-surface-700">
+                                            <th class="text-left py-2 px-3 font-medium text-surface-600 dark:text-surface-400">Stage</th>
+                                            <th class="text-left py-2 px-3 font-medium text-surface-600 dark:text-surface-400">Status</th>
+                                            <th class="text-right py-2 px-3 font-medium text-surface-600 dark:text-surface-400">Duration</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-surface-200 dark:divide-surface-700">
+                                        <template x-for="stage in pipelineStages" :key="stage.id">
+                                            <tr>
+                                                <td class="py-2 px-3 text-surface-900 dark:text-white" x-text="stage.name"></td>
+                                                <td class="py-2 px-3">
+                                                    <span
+                                                        class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                                                        :class="{
+                                                            'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400': isStageCompleted(job, stage.id),
+                                                            'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400': isStageRunning(job, stage.id),
+                                                            'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400': isStageError(job, stage.id),
+                                                            'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400': isStageSkipped(job, stage.id),
+                                                            'bg-surface-100 text-surface-500 dark:bg-surface-700 dark:text-surface-400': !isStageCompleted(job, stage.id) && !isStageRunning(job, stage.id) && !isStageError(job, stage.id) && !isStageSkipped(job, stage.id)
+                                                        }"
+                                                    >
+                                                        <span x-text="getStageStatus(job, stage.id)"></span>
+                                                    </span>
+                                                </td>
+                                                <td class="py-2 px-3 text-right font-mono text-surface-500" x-text="job.processing_times && job.processing_times[stage.id] ? (job.processing_times[stage.id] / 1000).toFixed(1) + 's' : (isStageSkipped(job, stage.id) ? 'N/A' : '-')"></td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Error Message -->
+                        <div x-show="job.error_message" class="mb-4">
+                            <h4 class="text-sm font-semibold text-red-600 dark:text-red-400 mb-2">Error</h4>
+                            <div class="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-lg">
+                                <p class="text-sm text-red-700 dark:text-red-300 font-mono whitespace-pre-wrap" x-text="job.error_message"></p>
+                            </div>
+                        </div>
+
+                        <!-- Processing Logs -->
+                        <div>
+                            <div class="flex items-center justify-between mb-2">
+                                <h4 class="text-sm font-semibold text-surface-700 dark:text-surface-300">Processing Log</h4>
+                                <button
+                                    @click="if (!showLogs) { logsLoading = true; api.jobs.getLogs(job.id).then(r => { logs = r.logs || []; logsLoading = false; }).catch(e => { console.error('Failed to load logs:', e); logsLoading = false; }); } showLogs = !showLogs"
+                                    class="text-sm text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1"
+                                >
+                                    <svg class="w-4 h-4 transition-transform" :class="{'rotate-180': showLogs}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                    <span x-text="showLogs ? 'Hide logs' : 'Show logs'"></span>
+                                </button>
+                            </div>
+
+                            <div x-show="showLogs" x-collapse>
+                                <!-- Log Loading -->
+                                <div x-show="logsLoading" class="text-center py-4">
+                                    <svg class="w-6 h-6 mx-auto text-surface-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                    </svg>
+                                    <p class="text-sm text-surface-500 mt-2">Loading logs...</p>
+                                </div>
+
+                                <!-- Log Entries -->
+                                <div x-show="!logsLoading && logs.length > 0" class="bg-surface-900 dark:bg-black rounded-lg p-3 max-h-64 overflow-y-auto font-mono text-xs">
+                                    <template x-for="log in logs" :key="log.id">
+                                        <div class="flex gap-2 py-0.5 hover:bg-surface-800/50">
+                                            <span class="text-surface-500 shrink-0" x-text="formatLogTime(log.timestamp)"></span>
+                                            <span
+                                                class="shrink-0 w-14"
+                                                :class="{
+                                                    'text-surface-400': log.level === 'DEBUG',
+                                                    'text-blue-400': log.level === 'INFO',
+                                                    'text-amber-400': log.level === 'WARNING',
+                                                    'text-red-400': log.level === 'ERROR'
+                                                }"
+                                                x-text="'[' + log.level + ']'"
+                                            ></span>
+                                            <span class="text-green-400 shrink-0" x-show="log.stage" x-text="'[' + log.stage + ']'"></span>
+                                            <span class="text-surface-200" x-text="log.message"></span>
+                                        </div>
+                                    </template>
+                                </div>
+
+                                <!-- No Logs -->
+                                <div x-show="!logsLoading && logs.length === 0" class="text-center py-4 bg-surface-50 dark:bg-surface-800/50 rounded-lg">
+                                    <p class="text-sm text-surface-500">No logs available for this job</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </template>
+
+        <!-- Loading Skeletons -->
+        <template x-if="isLoading && jobs.length === 0">
+            <div class="space-y-4">
+                <template x-for="i in 3" :key="i">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="flex items-start gap-4">
+                                <div class="skeleton w-12 h-12 rounded-xl shrink-0"></div>
+                                <div class="flex-1">
+                                    <div class="skeleton h-5 w-32 mb-2"></div>
+                                    <div class="skeleton h-4 w-48 mb-4"></div>
+                                    <div class="skeleton h-2 w-full rounded-full mb-4"></div>
+                                    <div class="flex gap-2">
+                                        <div class="skeleton w-8 h-8 rounded-full"></div>
+                                        <div class="skeleton w-8 h-8 rounded-full"></div>
+                                        <div class="skeleton w-8 h-8 rounded-full"></div>
+                                        <div class="skeleton w-8 h-8 rounded-full"></div>
+                                        <div class="skeleton w-8 h-8 rounded-full"></div>
+                                        <div class="skeleton w-8 h-8 rounded-full"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </template>
+
+        <!-- Empty State -->
+        <div x-show="!isLoading && filteredJobs.length === 0" x-transition class="card">
+            <div class="empty-state py-16">
+                <div class="empty-state-icon">
+                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <template x-if="filter === 'all' || filter === 'active'">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                        </template>
+                        <template x-if="filter === 'completed'">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </template>
+                        <template x-if="filter === 'failed'">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </template>
+                    </svg>
+                </div>
+                <p class="empty-state-title">
+                    <template x-if="filter === 'all'">No jobs yet</template>
+                    <template x-if="filter === 'active'">No active jobs</template>
+                    <template x-if="filter === 'completed'">No completed jobs</template>
+                    <template x-if="filter === 'failed'">No failed jobs</template>
+                </p>
+                <p class="empty-state-text">
+                    <template x-if="filter === 'all' || filter === 'active'">Documents from Paperless-ngx will be processed here</template>
+                    <template x-if="filter === 'completed'">Completed jobs will appear here</template>
+                    <template x-if="filter === 'failed'">All jobs are running smoothly</template>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function jobsPage() {
+    return {
+        jobs: [],
+        isLoading: true,
+        filter: 'all',
+        pollInterval: null,
+        highlightJobId: null,
+
+        // Pipeline stages definition
+        pipelineStages: [
+            { id: 'image_processing', name: 'Image Processing', label: 'Image' },
+            { id: 'ocr', name: 'OCR', label: 'OCR' },
+            { id: 'paperless_upload', name: 'Paperless Upload', label: 'Upload' },
+            { id: 'metadata_extraction', name: 'Metadata Extraction', label: 'Extract' },
+            { id: 'finalization', name: 'Finalization', label: 'Final' }
+        ],
+
+        stats: {
+            queued: 0,
+            processing: 0,
+            completed: 0,
+            failed: 0
+        },
+
+        async loadJobs() {
+            if (this.jobs.length === 0) {
+                this.isLoading = true;
+            }
+
+            try {
+                const response = await api.jobs.list({ page_size: 50 });
+                this.jobs = response.jobs || [];
+                this.calculateStats();
+            } catch (error) {
+                console.error('Failed to load jobs:', error);
+                if (Alpine.store('toast')) {
+                    Alpine.store('toast').show('Failed to load jobs', 'error');
+                }
+            } finally {
+                this.isLoading = false;
+            }
+        },
+
+        calculateStats() {
+            this.stats = {
+                queued: this.jobs.filter(j => j.status === 'queued').length,
+                processing: this.jobs.filter(j => j.status === 'processing').length,
+                completed: this.jobs.filter(j => j.status === 'completed').length,
+                failed: this.jobs.filter(j => j.status === 'failed').length
+            };
+        },
+
+        get filteredJobs() {
+            if (this.filter === 'all') return this.jobs;
+            if (this.filter === 'active') return this.jobs.filter(j => j.status === 'queued' || j.status === 'processing');
+            if (this.filter === 'completed') return this.jobs.filter(j => j.status === 'completed');
+            if (this.filter === 'failed') return this.jobs.filter(j => j.status === 'failed');
+            return this.jobs;
+        },
+
+        isStageCompleted(job, stageId) {
+            return job.stages_completed && job.stages_completed.includes(stageId);
+        },
+
+        isStageSkipped(job, stageId) {
+            return job.stages_skipped && job.stages_skipped.includes(stageId);
+        },
+
+        isStageRunning(job, stageId) {
+            return job.current_stage === stageId && job.status === 'processing';
+        },
+
+        isStageError(job, stageId) {
+            return job.status === 'failed' && job.current_stage === stageId;
+        },
+
+        getStageStatus(job, stageId) {
+            if (this.isStageCompleted(job, stageId)) return 'Completed';
+            if (this.isStageSkipped(job, stageId)) return 'Skipped';
+            if (this.isStageRunning(job, stageId)) return 'Running';
+            if (this.isStageError(job, stageId)) return 'Failed';
+            return 'Pending';
+        },
+
+        async loadLogs(jobId) {
+            // This function is called from the child x-data context
+            // We need to update the parent context
+            const jobCard = document.querySelector(`[x-data*="expanded"]`);
+            // Use Alpine's magic to set loading state
+            this.logsLoading = true;
+
+            try {
+                const response = await api.jobs.getLogs(jobId);
+                return response.logs || [];
+            } catch (error) {
+                console.error('Failed to load logs:', error);
+                return [];
+            }
+        },
+
+        async retryJob(jobId) {
+            try {
+                await api.jobs.retry(jobId);
+                if (Alpine.store('toast')) {
+                    Alpine.store('toast').show('Job queued for retry', 'success');
+                }
+                this.loadJobs();
+            } catch (error) {
+                if (Alpine.store('toast')) {
+                    Alpine.store('toast').show('Failed to retry job', 'error');
+                }
+            }
+        },
+
+        getStatusClass(status) {
+            const classes = {
+                'queued': 'status-pending',
+                'processing': 'status-processing',
+                'completed': 'status-approved',
+                'failed': 'status-failed'
+            };
+            return classes[status] || 'badge-secondary';
+        },
+
+        formatDuration(start, end) {
+            const ms = new Date(end) - new Date(start);
+            const seconds = Math.floor(ms / 1000);
+            if (seconds < 60) return seconds + 's';
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = seconds % 60;
+            return minutes + 'm ' + remainingSeconds + 's';
+        },
+
+        formatDateTime(dateStr) {
+            if (!dateStr) return '-';
+            const date = new Date(dateStr);
+            return date.toLocaleString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        },
+
+        formatLogTime(dateStr) {
+            if (!dateStr) return '';
+            const date = new Date(dateStr);
+            return date.toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false
+            });
+        },
+
+        init() {
+            // Check URL params for filter and highlight
+            const params = new URLSearchParams(window.location.search);
+            const statusFilter = params.get('status');
+            const highlightId = params.get('highlight');
+
+            if (statusFilter) {
+                if (statusFilter === 'queued' || statusFilter === 'processing') {
+                    this.filter = 'active';
+                } else if (statusFilter === 'completed') {
+                    this.filter = 'completed';
+                } else if (statusFilter === 'failed') {
+                    this.filter = 'failed';
+                }
+            }
+
+            // Store highlight ID to auto-expand that job after loading
+            if (highlightId) {
+                this.highlightJobId = highlightId;
+                window.highlightJobId = highlightId;
+            }
+
+            this.loadJobs();
+
+            // Poll for updates every 5 seconds when there are active jobs
+            this.pollInterval = setInterval(() => {
+                if (this.stats.processing > 0 || this.stats.queued > 0) {
+                    this.loadJobs();
+                }
+            }, 5000);
+        },
+
+        destroy() {
+            if (this.pollInterval) {
+                clearInterval(this.pollInterval);
+            }
+        }
+    };
+}
+</script>
+{% endblock %}

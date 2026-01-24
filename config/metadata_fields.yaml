@@ -1,0 +1,535 @@
+# Metadata Fields Configuration
+# Define fields to extract from documents using LLM
+# Each field can have a custom prompt for extraction
+
+fields:
+  - name: "document_type"
+    type: "enum"
+    description: "Classification of the document"
+    values:
+      - "invoice"
+      - "receipt"
+      - "contract"
+      - "letter"
+      - "official_notice"
+      - "bank_statement"
+      - "insurance_document"
+      - "medical_record"
+      - "tax_document"
+      - "warranty"
+      - "manual"
+      - "certificate"
+      - "id_document"
+      - "payslip"
+      - "utility_bill"
+      - "school"
+      - "pension"
+      - "investment"
+      - "subscription"
+      - "commercial"
+      - "other"
+    prompt: |
+      Classify this document into exactly ONE category.
+
+      Classification guide:
+      - invoice: Bills requesting payment (Rechnung). Has amount due, payment details
+      - receipt: Proof of completed payment (Quittung, Kassenbon)
+      - contract: Legal agreements requiring signature (Vertrag)
+      - letter: General correspondence without financial/legal significance
+      - official_notice: Government/authority correspondence (Bescheid, Amt)
+      - bank_statement: Account summaries, transaction lists (Kontoauszug)
+      - insurance_document: Policies, claims, coverage documents
+      - medical_record: Health documents (Arzt, Befund, Rezept)
+      - tax_document: Tax-related (Steuer, Finanzamt, Lohnsteuerbescheinigung)
+      - warranty: Product warranty cards and guarantee certificates (Garantieschein)
+      - manual: User guides, instruction manuals (Bedienungsanleitung, Gebrauchsanweisung)
+      - certificate: Certifications, diplomas (Zertifikat, Urkunde)
+      - id_document: Identity documents (Ausweis, Pass)
+      - payslip: Salary statements (Gehaltsabrechnung, Lohnabrechnung)
+      - utility_bill: Electricity, gas, water, internet, phone bills
+      - school: School documents, report cards, transcripts (Zeugnis, Schulbescheinigung)
+      - pension: Pension/retirement documents (Renteninformation, Rentenbescheid)
+      - investment: Investment statements, stock/fund documents (Depotauszug, Wertpapier)
+      - subscription: Subscription confirmations, membership documents (Abonnement, Mitgliedschaft)
+      - commercial: Marketing materials, advertisements, brochures (Werbung, Prospekt)
+      - other: Only if no category fits
+
+      Document text:
+      {ocr_text}
+
+      Respond with ONLY the category name.
+    required: true
+    paperless_mapping:
+      type: "document_type"
+      auto_create: true
+
+  - name: "sender"
+    type: "string"
+    description: "Who sent or issued the document (raw extraction)"
+    prompt: |
+      Extract the sender/issuer of this document.
+
+      Search locations (priority order):
+      1. Letterhead at top (company logo, name)
+      2. Return address block (Absender)
+      3. "Von:", "From:" labels
+      4. Signature block company name
+      5. Bank details owner (if sender owns account)
+
+      Formatting:
+      - Use the EXACT name as it appears in the document
+      - Include legal forms if present (GmbH, AG, e.V., Ltd.)
+      - For government: department name (e.g., "Finanzamt München")
+      - For individuals: full name (e.g., "Dr. Hans Mueller")
+      - Do not include addresses or phone numbers
+      - Do not normalize or correct the name
+
+      Document text:
+      {ocr_text}
+
+      Respond with sender name exactly as written, or null if not determinable.
+    required: false
+    paperless_mapping:
+      type: "correspondent"
+      auto_create: true
+
+  - name: "recipient"
+    type: "string"
+    description: "Intended recipient of the document"
+    prompt: |
+      Extract the intended recipient of this document.
+
+      Search locations:
+      1. Address block below sender
+      2. "An:", "To:", "Empfänger:" labels
+      3. "Sehr geehrte/r...", "Dear..." salutations
+      4. "z. Hd.", "Attention:" fields
+
+      Rules:
+      - Extract person or company name only
+      - Omit addresses and titles (Herr/Frau)
+      - For generic salutations ("Sehr geehrte Damen und Herren"), use null
+
+      Document text:
+      {ocr_text}
+
+      Respond with recipient name or null.
+    required: false
+    paperless_mapping:
+      type: "custom_field"
+      field_name: "Recipient"
+
+  - name: "document_date"
+    type: "date"
+    description: "Date the document was created/issued"
+    prompt: |
+      Extract the primary date of this document (creation/issue date).
+
+      Search locations (priority order):
+      1. "Datum:", "Date:", "Rechnungsdatum:" labels
+      2. Date in document header (top right)
+      3. Reference line: "Ihr Zeichen vom..."
+      4. Print date at bottom
+
+      Date formats:
+      - DD.MM.YYYY, DD.MM.YY (German)
+      - YYYY-MM-DD (ISO)
+      - Written: "15. Januar 2024"
+
+      IGNORE: Due dates, expiration dates, historical references
+
+      Document text:
+      {ocr_text}
+
+      Respond in YYYY-MM-DD format or null.
+    required: false
+    paperless_mapping:
+      type: "created_date"
+
+  - name: "due_date"
+    type: "date"
+    description: "Payment or action due date"
+    prompt: |
+      Extract any due date, deadline, or required action date.
+
+      Keywords:
+      German: "Fällig am", "Zahlbar bis", "Frist:", "Zahlungsziel:", "Einzuziehen am", "Lastschrift am"
+      English: "Due date:", "Payment due:", "Due by:", "Deadline:", "Respond by:"
+
+      Rules:
+      - Extract actual deadline, not document date
+      - For "sofort fällig" / "due immediately", use document date
+      - For "innerhalb von X Tagen" without explicit date, use null
+
+      Document text:
+      {ocr_text}
+
+      Respond in YYYY-MM-DD format or null.
+    required: false
+    paperless_mapping:
+      type: "custom_field"
+      field_name: "Due Date"
+      field_type: "date"
+
+  - name: "total_amount"
+    type: "decimal"
+    description: "Total monetary amount"
+    prompt: |
+      Extract the total/final amount to pay or main monetary value.
+
+      Keywords for final total:
+      German: "Gesamtbetrag", "Summe", "Endbetrag", "Rechnungsbetrag", "Zu zahlen"
+      English: "Total", "Grand Total", "Amount Due", "Balance Due"
+
+      Rules:
+      - Extract FINAL total, not subtotals or tax amounts
+      - Use period as decimal separator: 1234.56
+      - Remove currency symbols
+
+      IGNORE: Brutto/Netto subtotals, individual line items, tax-only amounts
+
+      Document text:
+      {ocr_text}
+
+      Respond with numeric value (e.g., 1234.56) or null.
+    required: false
+    paperless_mapping:
+      type: "custom_field"
+      field_name: "Amount"
+      field_type: "monetary"
+
+  - name: "currency"
+    type: "string"
+    description: "Currency code"
+    prompt: |
+      Identify the currency used in this document.
+
+      Search for:
+      - Symbols: € (EUR), $ (USD), £ (GBP), CHF
+      - Codes: EUR, USD, GBP, CHF, PLN, CZK
+      - Names: "Euro", "Dollar", "Franken"
+
+      Defaults:
+      - German documents without currency: EUR
+      - Swiss documents (CH address): CHF
+      - UK documents: GBP
+
+      Document text:
+      {ocr_text}
+
+      Respond with 3-letter ISO code (EUR, USD, GBP) or null.
+    required: false
+    paperless_mapping:
+      type: "custom_field"
+      field_name: "Currency"
+
+  - name: "reference_number"
+    type: "string"
+    description: "Invoice, order, or reference number"
+    prompt: |
+      Extract the primary reference, invoice, or case number.
+
+      Keywords:
+      German: "Rechnungsnummer", "Rechnungs-Nr.", "Aktenzeichen", "Az.", "Vertragsnummer", "Vorgangsnummer"
+      English: "Invoice No.", "Reference:", "Order #:", "Policy No."
+
+      Priority (if multiple exist):
+      1. Invoice number (for invoices)
+      2. Case number (for official documents)
+      3. Contract number (for contracts)
+
+      Document text:
+      {ocr_text}
+
+      Respond with reference number only, no labels.
+    required: false
+    paperless_mapping:
+      type: "custom_field"
+      field_name: "Reference"
+
+  - name: "subject"
+    type: "string"
+    description: "The actual subject or title of the document as stated in the document itself"
+    prompt: |
+      Extract the actual subject, title, or topic of this document as stated in the document.
+
+      Search locations (priority order):
+      1. Explicit subject lines:
+         - "Betreff:", "Subject:", "Re:", "Betrifft:"
+         - "Ihr Schreiben:", "Concerning:", "Regarding:"
+      2. Document headers/titles:
+         - Bold or large text at top of content
+         - Formal document titles (e.g., "Jahresrechnung 2024")
+      3. First descriptive line after salutation
+      4. Invoice/statement descriptions (e.g., "Mobilfunkrechnung Januar 2024")
+
+      Rules:
+      - Extract the ACTUAL text from the document
+      - Do NOT create or concatenate a title from other fields
+      - Do NOT include sender name or date unless part of actual subject
+      - Keep the original language of the document
+      - Maximum 150 characters
+      - If no clear subject exists, extract the main topic/purpose
+
+      Examples of good extractions:
+      - "Ihre Kfz-Versicherung - Beitragsrechnung 2024"
+      - "Mahnung - Rechnungsnummer 12345"
+      - "Einkommensteuerbescheid 2023"
+      - "Mobilfunkrechnung Dezember 2024"
+      - "Kündigung Ihres Vertrags zum 31.12.2024"
+
+      Examples of what NOT to do:
+      - "2024-01 Telekom Invoice 89.99 EUR" (this is concatenated metadata, not a subject)
+      - "Invoice" (too generic, find the actual subject)
+
+      Document text:
+      {ocr_text}
+
+      Respond with the extracted subject/title or null if none found.
+    required: false
+    paperless_mapping:
+      type: "title"
+
+  - name: "summary"
+    type: "text"
+    description: "Brief summary of document content (max 200 chars)"
+    prompt: |
+      Write a brief factual summary of this document. You MUST always provide a summary.
+
+      Summarize the most important information:
+      - Main purpose or content of the document
+      - Key dates, deadlines, or amounts (if present)
+      - Required actions (if any)
+
+      Style:
+      - Use document language
+      - Be concise, no filler words
+      - Don't repeat obvious info (document type, sender)
+      - Never return empty, "UNKNOWN", or "N/A"
+
+      Examples:
+      Bad: "This is an invoice from Telekom."
+      Bad: "UNKNOWN"
+      Bad: ""
+      Good: "Mobilfunkrechnung Januar, 5GB Datenvolumen überschritten."
+      Good: "Kontoauszug Q4 2024, Endstand 3.450,00 EUR."
+      Good: "Vertragskündigung zum 31.03.2025 bestätigt."
+
+      Document text:
+      {ocr_text}
+
+      Respond with a summary of max 200 characters. Always provide content.
+    required: false
+    paperless_mapping:
+      type: "custom_field"
+      field_name: "Summary"
+
+  - name: "language"
+    type: "enum"
+    description: "Detected document language"
+    values:
+      - "de"
+      - "en"
+    prompt: |
+      Detect the primary language of this document.
+
+      Indicators:
+      - German (de): "Sehr geehrte", "Rechnung", "Mit freundlichen Grüßen"
+      - English (en): "Dear", "Invoice", "Sincerely"
+
+      Determine by body text, not letterhead.
+
+      Document text:
+      {ocr_text}
+
+      Respond with language code only: "de" or "en"
+    required: true
+    paperless_mapping:
+      type: "custom_field"
+      field_name: "Language"
+
+  - name: "action_required"
+    type: "boolean"
+    description: "Whether document requires action"
+    prompt: |
+      Determine if this document requires action from the recipient.
+
+      Action required (true):
+      - Payment request (invoice, reminder)
+      - Deadline to respond
+      - Signature requirement
+      - Form to complete
+      - Confirmation request
+      - Appeal deadline
+
+      No action (false):
+      - Informational statements
+      - Payment confirmations/receipts
+      - General correspondence
+      - Manuals and guides
+
+      Document text:
+      {ocr_text}
+
+      Respond: true or false
+    required: false
+    paperless_mapping:
+      type: "tag"
+      tag_name: "action-required"
+      apply_if_true: true
+
+  - name: "keywords"
+    type: "array"
+    description: "3-5 relevant keywords for search"
+    prompt: |
+      Extract 3-5 unique keywords to help find this document.
+
+      Good keywords:
+      - Specific product/service names (iPhone 15, Kfz-Versicherung)
+      - Unique identifiers (account names, vehicle plates)
+      - Specific topics (Wasserschaden, Jobwechsel)
+      - Location names if relevant
+
+      Avoid (already captured elsewhere):
+      - Sender name
+      - Document type
+      - Generic terms (Rechnung, Brief, 2024)
+
+      Document text:
+      {ocr_text}
+
+      Respond with comma-separated keywords in document language.
+    required: false
+    paperless_mapping:
+      type: "tags"
+      auto_create: true
+
+  # New fields
+
+  - name: "validity_end_date"
+    type: "date"
+    description: "Expiration or validity end date for contracts, warranties, IDs"
+    prompt: |
+      Extract any expiration or validity end date from this document.
+
+      Keywords:
+      German: "Gültig bis", "Ablaufdatum", "Vertragslaufzeit bis", "Garantie bis", "Versichert bis"
+      English: "Valid until", "Expires:", "Expiration date:", "Warranty until:"
+
+      Document types with typical validity dates:
+      - ID documents: Expiration date
+      - Insurance: Policy period end
+      - Contracts: Contract end date
+      - Warranties: Warranty expiration
+
+      IGNORE: Payment due dates, document creation dates
+
+      Document text:
+      {ocr_text}
+
+      Respond in YYYY-MM-DD format or null.
+    required: false
+    paperless_mapping:
+      type: "custom_field"
+      field_name: "Valid Until"
+      field_type: "date"
+
+  - name: "tax_relevant"
+    type: "boolean"
+    description: "Whether document is relevant for tax purposes"
+    prompt: |
+      Determine if this document is relevant for personal tax filing.
+
+      Tax relevant (true):
+      - Income statements (Lohnsteuerbescheinigung)
+      - Tax office correspondence (Finanzamt)
+      - Donation receipts (Spendenquittung)
+      - Work-related expenses
+      - Home office expenses
+      - Health expenses if significant
+      - Education expenses (Fortbildung)
+      - Investment statements (Jahressteuerbescheinigung)
+      - Contractor invoices for home (Handwerkerrechnungen)
+
+      Not tax relevant (false):
+      - Personal shopping receipts
+      - Regular household bills
+      - Entertainment expenses
+      - Standard correspondence
+
+      Document text:
+      {ocr_text}
+
+      Respond: true or false
+    required: false
+    paperless_mapping:
+      type: "tag"
+      tag_name: "tax-relevant"
+      apply_if_true: true
+
+  - name: "account_number"
+    type: "string"
+    description: "Persistent account, policy, or customer number"
+    prompt: |
+      Extract the persistent account or customer number.
+
+      This differs from reference_number (document-specific).
+      Account numbers are reused across multiple documents.
+
+      Keywords:
+      German: "Kundennummer", "Kontonummer", "Vertragsnummer", "Policennummer", "Mitgliedsnummer"
+      English: "Account No.", "Customer ID", "Policy Number", "Member ID"
+
+      Examples:
+      - Utility account number (same on all bills)
+      - Insurance policy number
+      - IBAN for bank accounts
+      - Membership number
+
+      Document text:
+      {ocr_text}
+
+      Respond with account number or null.
+    required: false
+    paperless_mapping:
+      type: "custom_field"
+      field_name: "Account Number"
+
+  - name: "retention_period"
+    type: "enum"
+    description: "Recommended retention period"
+    values:
+      - "permanent"
+      - "10_years"
+      - "6_years"
+      - "3_years"
+      - "1_year"
+    prompt: |
+      Categorize the recommended retention period.
+
+      Guidelines:
+      - permanent: ID documents, property documents, pension documents
+      - 10_years: Tax documents, bank statements
+      - 6_years: Invoices for major purchases, important contracts
+      - 3_years: Utility bills, standard contracts, insurance correspondence
+      - 1_year: Routine statements, minor receipts
+
+      Document type defaults:
+      - tax_document -> 10_years
+      - contract -> 6_years
+      - invoice/receipt -> 3_years
+      - bank_statement -> 10_years
+      - warranty -> 6_years
+      - id_document -> permanent
+      - pension -> permanent
+      - school -> permanent (certificates) or 6_years (routine)
+      - investment -> 10_years
+
+      Document text:
+      {ocr_text}
+
+      Respond with one retention period.
+    required: false
+    paperless_mapping:
+      type: "custom_field"
+      field_name: "Retention Period"

@@ -1,0 +1,138 @@
+# Urgency Rules Configuration
+# Define how document urgency is calculated
+
+# Urgency levels (in order of priority)
+levels:
+  - id: "critical"
+    name: "Critical"
+    name_de: "Kritisch"
+    color: "#dc3545"
+    priority: 4
+
+  - id: "high"
+    name: "High"
+    name_de: "Hoch"
+    color: "#fd7e14"
+    priority: 3
+
+  - id: "medium"
+    name: "Medium"
+    name_de: "Mittel"
+    color: "#ffc107"
+    priority: 2
+
+  - id: "low"
+    name: "Low"
+    name_de: "Niedrig"
+    color: "#28a745"
+    priority: 1
+
+# Rules are evaluated in order, first match wins
+rules:
+  # Critical: Due very soon or certain document types with specific keywords
+  - name: "due_within_3_days"
+    description: "Documents due within 3 days"
+    urgency: "critical"
+    conditions:
+      - type: "due_date_within_days"
+        value: 3
+
+  - name: "final_notice"
+    description: "Final notices and payment demands"
+    urgency: "critical"
+    conditions:
+      - type: "keywords_any"
+        value:
+          - "mahnung"
+          - "final notice"
+          - "letzte mahnung"
+          - "inkasso"
+          - "collection"
+          - "zahlungsaufforderung"
+          - "fristablauf"
+          - "legal action"
+          - "rechtliche schritte"
+
+  - name: "official_with_deadline"
+    description: "Official notices with deadlines"
+    urgency: "critical"
+    conditions:
+      - type: "document_type"
+        value: "official_notice"
+      - type: "has_due_date"
+        value: true
+
+  # High: Due within a week or invoices with due dates
+  - name: "due_within_7_days"
+    description: "Documents due within 7 days"
+    urgency: "high"
+    conditions:
+      - type: "due_date_within_days"
+        value: 7
+
+  - name: "invoice_with_due_date"
+    description: "Invoices with payment due dates"
+    urgency: "high"
+    conditions:
+      - type: "document_type"
+        value: "invoice"
+      - type: "has_due_date"
+        value: true
+
+  - name: "tax_documents"
+    description: "Tax-related documents"
+    urgency: "high"
+    conditions:
+      - type: "document_type"
+        value: "tax_document"
+
+  - name: "reminder_keywords"
+    description: "Reminder or warning documents"
+    urgency: "high"
+    conditions:
+      - type: "keywords_any"
+        value:
+          - "erinnerung"
+          - "reminder"
+          - "zahlungserinnerung"
+          - "payment reminder"
+          - "overdue"
+          - "überfällig"
+
+  # Medium: Due within a month or certain document types
+  - name: "due_within_30_days"
+    description: "Documents due within 30 days"
+    urgency: "medium"
+    conditions:
+      - type: "due_date_within_days"
+        value: 30
+
+  - name: "contracts"
+    description: "Contracts and agreements"
+    urgency: "medium"
+    conditions:
+      - type: "document_type"
+        value: "contract"
+
+  - name: "insurance_documents"
+    description: "Insurance-related documents"
+    urgency: "medium"
+    conditions:
+      - type: "document_type"
+        value: "insurance_document"
+
+  - name: "action_required"
+    description: "Documents requiring action"
+    urgency: "medium"
+    conditions:
+      - type: "field_equals"
+        field: "action_required"
+        value: true
+
+  # Low: Default for everything else
+  - name: "default"
+    description: "Default urgency for unmatched documents"
+    urgency: "low"
+    conditions:
+      - type: "always"
+        value: true

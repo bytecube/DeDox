@@ -1,0 +1,168 @@
+# DeDox Main Settings
+# This file configures the core application behavior
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4
+  debug: false
+  # Hostname used for webhook URL construction (container/service name)
+  service_hostname: "${DEDOX_SERVICE_HOSTNAME:dedox}"
+
+auth:
+  # Secret key for JWT - MUST be set via DEDOX_JWT_SECRET env var in production
+  secret_key: "${DEDOX_JWT_SECRET:change-me-in-production}"
+  algorithm: "HS256"
+  access_token_expire_hours: 24
+  refresh_token_expire_days: 7
+
+storage:
+  # Base path for all data storage
+  base_path: "/app/data"
+  upload_path: "/app/data/uploads"
+  processed_path: "/app/data/processed"
+  vector_db_path: "/app/data/vectors/dedox.db"
+
+processing:
+  max_file_size_mb: 50
+  supported_formats:
+    - "jpg"
+    - "jpeg"
+    - "png"
+    - "pdf"
+    - "tiff"
+    - "tif"
+  default_language: "de"
+  supported_languages:
+    - "de"
+    - "en"
+  # Correspondent cache TTL in seconds
+  correspondent_cache_ttl: 300
+  # Max correspondents to fetch for matching
+  max_correspondents: 200
+  # Default pagination limit for API responses
+  pagination_limit: 100
+
+ocr:
+  engine: "tesseract"
+  # Tesseract language codes
+  languages:
+    - "deu"
+    - "eng"
+  # Minimum confidence threshold (0-100)
+  confidence_threshold: 60
+  # Page segmentation mode (3 = fully automatic)
+  psm: 3
+
+# Image processing settings for document enhancement
+image_processing:
+  # Gaussian blur kernel size (must be odd)
+  gaussian_blur_kernel: 5
+  # Canny edge detection thresholds
+  canny_threshold_low: 75
+  canny_threshold_high: 200
+  # Alternative Canny thresholds for line detection
+  canny_line_threshold_low: 50
+  canny_line_threshold_high: 150
+  # Hough line detection parameters
+  hough_min_line_length: 100
+  hough_max_line_gap: 10
+
+llm:
+  provider: "ollama"
+  base_url: "${DEDOX_OLLAMA_URL:http://ollama:11434}"
+  model: "${OLLAMA_MODEL:qwen2.5:14b}"
+  # Increased timeout to handle initial model loading and schema-constrained generation
+  timeout_seconds: 600
+  temperature: 0.1
+  max_retries: 3
+  # Context window size (num_ctx for Ollama)
+  context_window: "${OLLAMA_CONTEXT_WINDOW:16384}"
+  # Max characters of OCR text to send to LLM
+  ocr_text_limit: "${OLLAMA_OCR_TEXT_LIMIT:8000}"
+
+paperless:
+  base_url: "${DEDOX_PAPERLESS_URL:http://host.docker.internal:8080}"
+  # API token - set via DEDOX_PAPERLESS_TOKEN env var or auto-generated using admin credentials
+  api_token: "${DEDOX_PAPERLESS_TOKEN:}"
+  # Admin credentials for automatic API token generation (used if api_token is empty)
+  admin_user: "${PAPERLESS_ADMIN_USER:admin}"
+  admin_password: "${PAPERLESS_ADMIN_PASSWORD:}"
+  # Auto-generate token using admin credentials if api_token is not provided
+  auto_generate_token: true
+  verify_ssl: false
+  timeout_seconds: 30
+  # API version for Accept header (e.g., "application/json; version=9")
+  api_version: "${PAPERLESS_API_VERSION:9}"
+  # Timeout for downloading documents (seconds)
+  document_download_timeout: "${PAPERLESS_DOWNLOAD_TIMEOUT:120}"
+  # Timeout for connection tests (seconds)
+  connection_test_timeout: 10
+  # Tag to apply while processing
+  processing_tag: "dedox:processing"
+  # Tag for successfully enhanced documents
+  enhanced_tag: "dedox:enhanced"
+  # Tag for documents that failed processing
+  error_tag: "dedox:error"
+  # Tag for documents needing review
+  review_tag: "dedox:needs-review"
+  # Tag for potential duplicates
+  duplicate_tag: "dedox:potential-duplicate"
+  # Tag to trigger reprocessing (add this tag in Paperless to reprocess a document)
+  reprocess_tag: "dedox:reprocess"
+
+  # Tag colors for Paperless
+  tag_colors:
+    default: "#808080"      # Gray
+    processing: "#FFA500"   # Orange
+    enhanced: "#28A745"     # Green
+    error: "#DC3545"        # Red
+    review: "#FFC107"       # Yellow
+    reprocess: "#9C27B0"    # Purple
+    pending: "#FFA500"      # Orange
+
+  # Webhook configuration for receiving events from Paperless-ngx
+  webhook:
+    # Enable webhook endpoint at /api/webhooks/paperless/document-added
+    enabled: true
+    # HMAC secret for verifying webhook signatures (leave empty to disable verification)
+    secret: "${DEDOX_WEBHOOK_SECRET:}"
+    # Auto-create custom fields in Paperless if they don't exist
+    auto_create_custom_fields: true
+    # Auto-create Paperless workflow on startup (set to true to enable)
+    auto_setup_workflow: true
+
+database:
+  # SQLite database path
+  path: "/app/data/dedox.db"
+  # Enable WAL mode for better concurrency
+  wal_mode: true
+
+openwebui:
+  # Enable/disable Open WebUI sync
+  enabled: true
+  # Base URL for Open WebUI API (internal container address)
+  base_url: "http://open-webui:8080"
+  # Frontend port for external access
+  frontend_port: 3000
+  # API authentication - leave empty to auto-generate using admin credentials
+  api_key: "${DEDOX_OPENWEBUI_API_KEY:}"
+  # Admin credentials for automatic API key generation
+  admin_email: "${OPENWEBUI_ADMIN_EMAIL:admin@example.com}"
+  admin_password: "${OPENWEBUI_ADMIN_PASSWORD:admin}"
+  # Auto-generate API key if not provided (requires admin credentials)
+  auto_generate_api_key: true
+  # Knowledge base ID to sync documents to (leave empty for auto-creation)
+  knowledge_base_id: "${DEDOX_OPENWEBUI_KB_ID:}"
+  # Auto-create knowledge base if it doesn't exist (recommended for zero-setup)
+  auto_create_knowledge_base: true
+  # Timeout for API requests (increased for synchronous processing)
+  timeout_seconds: 300
+  # Wait for file processing before adding to knowledge base (disabled - using synchronous processing)
+  wait_for_processing: false
+  # Max wait time for file processing (seconds)
+  max_processing_wait: 300
+  # Polling interval for status checks (seconds)
+  poll_interval: "${OPENWEBUI_POLL_INTERVAL:5}"
+  # Wait time for file processing (seconds)
+  file_processing_wait: 10
