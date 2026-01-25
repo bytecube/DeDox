@@ -11,9 +11,13 @@ import warnings
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
+
+# Load .env file from project root (looks in current dir and parents)
+load_dotenv()
 
 
 def _resolve_env_vars(value: Any) -> Any:
