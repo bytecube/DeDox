@@ -1,4 +1,4 @@
-# Python dependencies for DeDox Sidecar Service
+# Python dependencies for DeDox
 
 # Web framework
 fastapi>=0.104.0

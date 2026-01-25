@@ -1,5 +1,5 @@
 """
-DeDox Sidecar Service - FastAPI Application.
+DeDox - FastAPI Application.
 
 Main entry point for the document processing API.
 """
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler."""
     # Startup
-    logger.info("Starting DeDox Sidecar Service...")
+    logger.info("Starting DeDox...")
     
     # Load configuration
     reload_config()
@@ -128,7 +128,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
     
     # Shutdown
-    logger.info("Shutting down DeDox Sidecar Service...")
+    logger.info("Shutting down DeDox...")
 
 
 def create_app() -> FastAPI:
@@ -136,7 +136,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
     
     app = FastAPI(
-        title="DeDox Sidecar Service",
+        title="DeDox",
         description="Self-hosted document archival service with OCR, LLM metadata extraction, and Paperless-ngx integration",
         version="1.0.0",
         docs_url="/docs" if settings.server.debug else None,

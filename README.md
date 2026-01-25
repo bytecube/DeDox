@@ -1,7 +1,7 @@
 # DeDox - Detoxify Your Document Chaos
 
-[![Tests](https://github.com/bytecube/dedox-sidecar-service/actions/workflows/test.yml/badge.svg)](https://github.com/bytecube/dedox-sidecar-service/actions/workflows/test.yml)
-[![Docker Build](https://github.com/bytecube/dedox-sidecar-service/actions/workflows/docker.yml/badge.svg)](https://github.com/bytecube/dedox-sidecar-service/actions/workflows/docker.yml)
+[![Tests](https://github.com/bytecube/dedox/actions/workflows/test.yml/badge.svg)](https://github.com/bytecube/dedox/actions/workflows/test.yml)
+[![Docker Build](https://github.com/bytecube/dedox/actions/workflows/docker.yml/badge.svg)](https://github.com/bytecube/dedox/actions/workflows/docker.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
@@ -124,7 +124,7 @@ All components communicate via standard REST APIs over your local network — **
 1. Clone the repository:
    ```bash
    git clone <repository-url>
-   cd dedox-sidecar-service
+   cd dedox
    ```
 
 2. Copy and configure environment:
