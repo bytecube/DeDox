@@ -23,6 +23,8 @@ services:
       - DEDOX_PAPERLESS_URL=http://paperless:8000
       - DEDOX_PAPERLESS_TOKEN=${DEDOX_PAPERLESS_TOKEN:-}
       - DEDOX_OLLAMA_URL=http://ollama:11434
+      # LLM model to use
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:14b}
       # Paperless admin credentials for auto token generation
       - PAPERLESS_ADMIN_USER=${PAPERLESS_ADMIN_USER:-admin}
       - PAPERLESS_ADMIN_PASSWORD=${PAPERLESS_ADMIN_PASSWORD:-admin}
@@ -63,6 +65,8 @@ services:
       - DEDOX_PAPERLESS_URL=http://paperless:8000
       - DEDOX_PAPERLESS_TOKEN=${DEDOX_PAPERLESS_TOKEN:-}
       - DEDOX_OLLAMA_URL=http://ollama:11434
+      # LLM model to use
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:14b}
       # Paperless admin credentials for auto token generation
       - PAPERLESS_ADMIN_USER=${PAPERLESS_ADMIN_USER:-admin}
       - PAPERLESS_ADMIN_PASSWORD=${PAPERLESS_ADMIN_PASSWORD:-admin}

@@ -29,6 +29,7 @@ pytesseract>=0.3.10
 
 # Configuration
 PyYAML>=6.0.1
+python-dotenv>=1.0.0
 
 # Utilities
 python-multipart>=0.0.6
