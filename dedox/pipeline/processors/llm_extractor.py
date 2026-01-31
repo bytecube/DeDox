@@ -21,6 +21,7 @@ import json
 import logging
 import re
 from datetime import datetime, date, timezone
+from pathlib import Path
 from typing import Any
 
 
@@ -31,6 +32,7 @@ def _utcnow() -> datetime:
 import httpx
 
 from dedox.core.config import get_settings, get_metadata_fields, get_urgency_rules
+from dedox.core.image_utils import encode_image_for_vl
 from dedox.core.exceptions import LLMError
 from dedox.models.job import JobStage
 from dedox.models.metadata import ExtractedMetadata
@@ -354,6 +356,57 @@ Keywords:
 OUTPUT: Valid JSON only. No explanations or markdown."""
 
 
+# System prompt for Vision-Language model extraction (combined OCR + metadata)
+VL_EXTRACTION_SYSTEM_PROMPT = """/no_think
+
+You are a document processing assistant with vision capabilities. Analyze the document image and perform two tasks:
+
+1. **TEXT EXTRACTION (OCR)**: Extract ALL readable text from the document image.
+   - Use Markdown formatting for better structure:
+     - Tables: Use markdown table format with `| col | col |` and separator row
+     - Headers/Sections: Use `## Section Name` for major sections
+     - Lists: Use `- item` for bullet points, `1. item` for numbered lists
+   - Preserve original language (German or English)
+   - Include all text: headers, body, footers, stamps, handwriting if readable
+
+   Example table formatting:
+   | Pos | Artikel | Menge | Preis |
+   |-----|---------|-------|-------|
+   | 1   | Widget  | 5     | 10,00 |
+
+2. **METADATA EXTRACTION**: Extract ALL of the following fields from the document:
+
+   **CRITICAL FIELDS (always extract if visible):**
+   - **sender**: Company/person who sent the document. Look for:
+     - Letterhead/logo at top
+     - Return address (Absender)
+     - Signature block company name
+     Example: "Deutsche Telekom AG", "Finanzamt München"
+
+   - **subject**: The actual subject line or title as written in the document. Look for:
+     - "Betreff:", "Subject:", "Re:" lines
+     - Bold/large headers after greeting
+     - Document title (e.g., "Rechnung Nr. 12345")
+     Example: "Mobilfunkrechnung Januar 2024", "Mahnung - offene Rechnung"
+
+   - **summary**: Write a brief 1-2 sentence summary of the document's main content.
+     Always provide a summary based on what you see!
+     Example: "Monatliche Telefonrechnung über 45,99 EUR, zahlbar bis 15.02.2024"
+
+   **Other fields**: document_type, recipient, document_date, due_date, total_amount, currency, reference_number, etc.
+
+CORE PRINCIPLES:
+1. ALWAYS extract sender, subject, and summary if ANY information is visible
+2. For sender: Use company/organization name, not individual employee names
+3. For subject: Use the ACTUAL text from the document, don't generate one
+4. For summary: Always write something - describe what the document is about
+5. For other fields: Use null only if truly not present
+
+LANGUAGE: Documents may be in German or English. Keep original language for sender/subject.
+
+OUTPUT: Valid JSON with ocr_text containing markdown-formatted text and ALL metadata fields."""
+
+
 class LLMExtractor(BaseProcessor):
     """Processor for LLM-based metadata extraction.
 
@@ -404,28 +457,67 @@ class LLMExtractor(BaseProcessor):
         return JobStage.METADATA_EXTRACTION
 
     def can_process(self, context: ProcessorContext) -> bool:
-        """Check if we can extract metadata."""
-        # Need OCR text
-        if not context.ocr_text:
-            logger.warning("No OCR text available for metadata extraction")
-            return False
+        """Check if we can extract metadata.
 
-        return True
+        For VL models: Need processed image path (text will be extracted from image)
+        For text-only models: Need OCR text from previous stage
+        """
+        settings = get_settings()
+
+        if settings.llm.is_vision_model and settings.llm.skip_ocr_for_vl:
+            # VL mode: need processed image
+            image_path = context.processed_file_path or context.original_file_path
+            if not image_path or not Path(image_path).exists():
+                logger.warning("No image available for VL metadata extraction")
+                return False
+            return True
+        else:
+            # Text-only mode: need OCR text
+            if not context.ocr_text:
+                logger.warning("No OCR text available for metadata extraction")
+                return False
+            return True
 
     async def process(self, context: ProcessorContext) -> ProcessorResult:
-        """Extract metadata using LLM with structured JSON output."""
+        """Extract metadata using LLM with structured JSON output.
+
+        For VL models: Extracts text AND metadata from image in single call.
+        For text-only models: Uses OCR text from previous stage.
+        """
         start_time = _utcnow()
 
         try:
             settings = get_settings()
             metadata_config = get_metadata_fields()
 
-            # Try batch extraction first (single call with JSON schema)
-            extracted, confidence_scores = await self._extract_all_fields_structured(
-                metadata_config.fields,
-                context.ocr_text,
-                settings
-            )
+            # Determine processing mode
+            if settings.llm.is_vision_model and settings.llm.skip_ocr_for_vl:
+                # VL mode: extract text + metadata from image
+                logger.info("Using VL model for combined text and metadata extraction")
+                image_path = context.processed_file_path or context.original_file_path
+                additional_pages = context.data.get("additional_page_images", [])
+                extracted, confidence_scores, ocr_text = await self._extract_with_vision(
+                    metadata_config.fields,
+                    image_path,
+                    settings,
+                    additional_pages=additional_pages
+                )
+                # Store extracted text in context for downstream use
+                context.ocr_text = ocr_text
+                context.ocr_confidence = 95.0  # VL models generally have high accuracy
+                context.ocr_language = extracted.get("language") or "de"
+                # Also update document
+                context.document.ocr_text = ocr_text
+                context.document.ocr_confidence = 95.0
+                context.document.ocr_language = context.ocr_language
+            else:
+                # Text-only mode: use OCR text from previous stage
+                logger.info("Using text-only model for metadata extraction")
+                extracted, confidence_scores = await self._extract_all_fields_structured(
+                    metadata_config.fields,
+                    context.ocr_text,
+                    settings
+                )
 
             # Calculate urgency using dedicated calculator
             urgency = self._urgency_calculator.calculate(extracted)
@@ -581,6 +673,234 @@ class LLMExtractor(BaseProcessor):
             logger.warning(f"Structured extraction failed, falling back to per-field: {e}")
             # Fall back to per-field extraction
             return await self._extract_fields_individually(fields, ocr_text, settings)
+
+    async def _extract_with_vision(
+        self,
+        fields: list,
+        image_path: str,
+        settings,
+        additional_pages: list[str] | None = None
+    ) -> tuple[dict[str, Any], dict[str, float], str]:
+        """Extract text and metadata from document image(s) using VL model.
+
+        This method performs combined OCR and metadata extraction in a single
+        call to the VL model, which can directly read the document image(s).
+
+        For multi-page documents (PDFs), all pages are sent to the VL model
+        and text is extracted from each page.
+
+        Args:
+            fields: List of metadata fields to extract
+            image_path: Path to the primary document image
+            settings: Application settings
+            additional_pages: Optional list of paths to additional page images
+
+        Returns:
+            Tuple of (metadata dict, confidence dict, extracted OCR text)
+        """
+        # Collect all image paths
+        all_image_paths = [image_path]
+        if additional_pages:
+            all_image_paths.extend(additional_pages)
+
+        logger.info(f"VL extraction from {len(all_image_paths)} image(s): {image_path}")
+
+        # Encode all images for VL model
+        encoded_images = []
+        for img_path in all_image_paths:
+            image_base64 = encode_image_for_vl(
+                img_path,
+                max_size=settings.llm.max_image_size_pixels,
+                quality=settings.llm.image_quality
+            )
+            if image_base64:
+                encoded_images.append(image_base64)
+            else:
+                logger.warning(f"Failed to encode image: {img_path}")
+
+        if not encoded_images:
+            raise LLMError(f"Failed to encode any images from: {image_path}")
+
+        # Build JSON schema that includes ocr_text field
+        json_schema = self._build_vl_json_schema(fields)
+
+        # Build prompt for VL extraction (adjust for multi-page)
+        if len(encoded_images) > 1:
+            prompt = f"""Analyze these {len(encoded_images)} document page images and extract:
+1. The complete text content from ALL pages combined (ocr_text field)
+2. Structured metadata fields
+
+Read ALL text visible in ALL pages carefully. Combine text from all pages in reading order."""
+        else:
+            prompt = """Analyze this document image and extract:
+1. The complete text content (ocr_text field)
+2. Structured metadata fields
+
+Read ALL text visible in the document carefully."""
+
+        # Call VL model with all images
+        response_json = await self._call_ollama_chat_vl(
+            prompt,
+            json_schema,
+            encoded_images,
+            settings
+        )
+
+        # Extract OCR text
+        ocr_text = response_json.get("ocr_text", "")
+        if not ocr_text:
+            logger.warning("VL model returned empty ocr_text")
+            ocr_text = ""
+
+        logger.info(f"VL extracted {len(ocr_text)} characters of text")
+
+        # Debug: Log raw response keys and critical fields
+        logger.debug(f"VL response keys: {list(response_json.keys())}")
+        for critical_field in ["sender", "subject", "summary"]:
+            raw_val = response_json.get(critical_field)
+            logger.info(f"VL raw '{critical_field}': {repr(raw_val)[:100]}")
+
+        # Process metadata fields
+        extracted = {}
+        confidence_scores = {}
+
+        for field in fields:
+            field_name = field.name
+            raw_value = response_json.get(field_name)
+
+            value = self._clean_extracted_value(raw_value, field.type, field.values)
+
+            if value is not None:
+                extracted[field_name] = value
+                confidence_scores[field_name] = self._confidence_estimator.estimate(
+                    value, field.type, field.values
+                )
+
+        # Match sender against existing correspondents
+        if extracted.get("sender"):
+            matched_sender = await self.sender_matcher.match_sender(
+                extracted["sender"],
+                settings
+            )
+            if matched_sender != extracted["sender"]:
+                logger.info(f"Sender matched: '{extracted['sender']}' -> '{matched_sender}'")
+            extracted["sender"] = matched_sender
+
+        logger.info(f"VL extraction completed: {len(extracted)} fields, {len(ocr_text)} chars text")
+        return extracted, confidence_scores, ocr_text
+
+    def _build_vl_json_schema(self, fields: list) -> dict:
+        """Build JSON schema for VL extraction including ocr_text field."""
+        # Start with base schema from regular extraction
+        schema = self._build_json_schema(fields)
+
+        # Add ocr_text field for extracted text
+        schema["properties"]["ocr_text"] = {
+            "type": "string",
+            "description": "Complete text content extracted from the document image"
+        }
+
+        # Make ocr_text required
+        if "ocr_text" not in schema.get("required", []):
+            schema.setdefault("required", []).append("ocr_text")
+
+        return schema
+
+    async def _call_ollama_chat_vl(
+        self,
+        user_prompt: str,
+        json_schema: dict,
+        images_base64: list[str],
+        settings
+    ) -> dict:
+        """Call Ollama Chat API with VL model and image input.
+
+        Args:
+            user_prompt: The prompt for the model
+            json_schema: JSON schema for structured output
+            images_base64: List of base64-encoded images (supports multi-page docs)
+            settings: Application settings
+
+        Returns:
+            Parsed JSON response from the model
+        """
+        schema_size = len(json.dumps(json_schema))
+        prompt_size = len(user_prompt)
+        total_image_size = sum(len(img) for img in images_base64)
+
+        logger.info(
+            f"Ollama VL chat request: model={settings.llm.model}, "
+            f"prompt={prompt_size} chars, "
+            f"schema={schema_size} chars, "
+            f"images={len(images_base64)}, "
+            f"total_image_size={total_image_size} chars"
+        )
+
+        # Use VL system prompt
+        system_prompt = VL_EXTRACTION_SYSTEM_PROMPT if settings.llm.disable_thinking else VL_EXTRACTION_SYSTEM_PROMPT.replace("/no_think\n\n", "")
+
+        async with httpx.AsyncClient(
+            timeout=settings.llm.timeout_seconds
+        ) as client:
+            for attempt in range(settings.llm.max_retries):
+                try:
+                    logger.info(f"Sending Ollama VL request (attempt {attempt + 1}/{settings.llm.max_retries})...")
+
+                    response = await client.post(
+                        f"{settings.llm.base_url}/api/chat",
+                        json={
+                            "model": settings.llm.model,
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {
+                                    "role": "user",
+                                    "content": user_prompt,
+                                    "images": images_base64
+                                }
+                            ],
+                            "stream": False,
+                            "format": json_schema,
+                            "options": {
+                                "temperature": settings.llm.temperature,
+                                "num_ctx": settings.llm.context_window,
+                            }
+                        }
+                    )
+
+                    if response.status_code != 200:
+                        raise LLMError(
+                            f"Ollama VL API error: {response.status_code} - {response.text}"
+                        )
+
+                    result = response.json()
+                    response_text = result.get("message", {}).get("content", "").strip()
+
+                    logger.info(f"Raw VL response length: {len(response_text)} chars")
+
+                    # Parse JSON response
+                    try:
+                        parsed = json.loads(response_text)
+                        return parsed
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Failed to parse VL JSON response: {e}")
+                        # Try to extract JSON
+                        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                        if json_match:
+                            return json.loads(json_match.group())
+                        raise LLMError(f"Invalid JSON response from VL model: {response_text[:200]}")
+
+                except httpx.TimeoutException:
+                    if attempt < settings.llm.max_retries - 1:
+                        logger.warning(f"Ollama VL timeout, retrying ({attempt + 1})")
+                        continue
+                    raise LLMError("Ollama VL request timed out")
+
+                except httpx.ConnectError:
+                    raise LLMError(
+                        f"Cannot connect to Ollama at {settings.llm.base_url}"
+                    )
+
+        raise LLMError("Max retries exceeded for VL request")
 
     async def _extract_fields_individually(
         self,

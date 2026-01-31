@@ -179,7 +179,7 @@ class LLMSettings(BaseModel):
     """LLM provider configuration."""
     provider: str = "ollama"
     base_url: str = "http://ollama:11434"
-    model: str = "qwen2.5:14b"
+    model: str = "qwen3-vl:8b"
     # Increased timeout to handle initial model loading and complex extractions
     timeout_seconds: int = 600
     temperature: float = 0.1
@@ -188,6 +188,23 @@ class LLMSettings(BaseModel):
     context_window: int = 16384
     # Max characters of OCR text to send to LLM
     ocr_text_limit: int = 8000
+
+    # Vision-Language model settings
+    vision_enabled: bool = True
+    vision_model_patterns: list[str] = ["*-vl*", "*vision*", "*llava*", "*minicpm-v*"]
+    max_image_size_pixels: int = 1568
+    image_quality: int = 85
+    disable_thinking: bool = True
+    skip_ocr_for_vl: bool = True
+
+    @property
+    def is_vision_model(self) -> bool:
+        """Check if current model is a vision-language model based on name patterns."""
+        import fnmatch
+        if not self.vision_enabled:
+            return False
+        model_lower = self.model.lower()
+        return any(fnmatch.fnmatch(model_lower, pattern) for pattern in self.vision_model_patterns)
 
     @property
     def ollama_url(self) -> str:

@@ -55,36 +55,65 @@ class ImageProcessor(BaseProcessor):
         return content_type.startswith("image/") or content_type == "application/pdf"
     
     async def process(self, context: ProcessorContext) -> ProcessorResult:
-        """Process the image."""
+        """Process the image.
+
+        For VL models: Skip OCR-specific enhancements (perspective correction,
+        denoising, etc.) and just do basic format conversion.
+        For text-only models: Apply full enhancement pipeline for better OCR.
+        """
         start_time = _utcnow()
-        
+
         try:
             original_path = Path(context.original_file_path)
             settings = get_settings()
-            
+
             # Calculate file hash
             file_hash = self._calculate_hash(original_path)
             context.document.file_hash = file_hash
             context.data["file_hash"] = file_hash
-            
-            # Handle PDF vs image
-            if context.document.content_type == "application/pdf":
-                # For PDFs, convert first page to image for processing
-                processed_path = await self._process_pdf(original_path, settings)
+
+            # Check if VL model is active - skip OCR-specific enhancements
+            skip_enhancements = (
+                settings.llm.is_vision_model and settings.llm.skip_ocr_for_vl
+            )
+
+            # Initialize additional pages list for multi-page documents
+            self._additional_pages = []
+
+            if skip_enhancements:
+                logger.info("VL mode: Skipping OCR-specific image enhancements")
+                # Simple conversion without enhancements
+                if context.document.content_type == "application/pdf":
+                    processed_path = await self._convert_pdf_simple(original_path, settings)
+                else:
+                    processed_path = await self._convert_image_simple(original_path, settings)
+
+                # Store additional page paths in context for multi-page PDFs
+                if self._additional_pages:
+                    context.data["additional_page_images"] = self._additional_pages
+                    logger.info(f"Multi-page PDF: {len(self._additional_pages) + 1} total pages")
             else:
-                # Process image
-                processed_path = await self._process_image(original_path, settings)
-            
+                # Full enhancement pipeline for OCR
+                if context.document.content_type == "application/pdf":
+                    processed_path = await self._process_pdf(original_path, settings)
+                else:
+                    processed_path = await self._process_image(original_path, settings)
+
             context.processed_file_path = str(processed_path)
             context.data["processed_path"] = str(processed_path)
-            
+
+            msg = "Image converted" if skip_enhancements else "Image processed"
             return ProcessorResult.ok(
                 stage=self.stage,
-                message=f"Image processed: {processed_path.name}",
-                data={"processed_path": str(processed_path), "file_hash": file_hash},
+                message=f"{msg}: {processed_path.name}",
+                data={
+                    "processed_path": str(processed_path),
+                    "file_hash": file_hash,
+                    "enhancements_applied": not skip_enhancements
+                },
                 processing_time_ms=self._measure_time(start_time),
             )
-            
+
         except Exception as e:
             logger.exception(f"Image processing failed: {e}")
             return ProcessorResult.fail(
@@ -174,7 +203,75 @@ class ImageProcessor(BaseProcessor):
         except ImportError:
             logger.warning("pdf2image not available, using original PDF")
             return input_path
-    
+
+    async def _convert_image_simple(self, input_path: Path, settings: Any) -> Path:
+        """Simple image conversion without OCR enhancements.
+
+        Used for VL models that can handle raw images directly.
+        Just converts to a standard format (PNG) without perspective
+        correction, denoising, or other OCR-specific processing.
+        """
+        # Open with PIL for consistent format handling
+        img = Image.open(str(input_path))
+
+        # Convert to RGB if necessary (handles RGBA, P, L modes)
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+
+        # Create output path
+        processed_dir = Path(settings.storage.processed_path)
+        processed_dir.mkdir(parents=True, exist_ok=True)
+
+        output_path = processed_dir / f"converted_{input_path.stem}.png"
+        img.save(str(output_path), format="PNG")
+
+        logger.info(f"Simple image conversion saved: {output_path}")
+        return output_path
+
+    async def _convert_pdf_simple(self, input_path: Path, settings: Any) -> Path:
+        """Simple PDF conversion without OCR enhancements.
+
+        Used for VL models that can handle raw images directly.
+        Converts PDF pages to images without perspective correction
+        or other OCR-specific processing.
+
+        For multi-page PDFs, saves each page as a separate PNG file
+        and returns the first page path. Additional page paths are
+        stored in self._additional_pages for the LLMExtractor to use.
+        """
+        try:
+            from pdf2image import convert_from_path
+
+            # Convert PDF pages to images
+            images = convert_from_path(str(input_path), dpi=settings.ocr.dpi)
+
+            if not images:
+                raise ValueError("PDF contains no pages")
+
+            processed_dir = Path(settings.storage.processed_path)
+            processed_dir.mkdir(parents=True, exist_ok=True)
+
+            # Save each page as separate PNG for VL model
+            page_paths = []
+            for i, page_img in enumerate(images):
+                page_path = processed_dir / f"converted_{input_path.stem}_page{i+1}.png"
+                page_img.save(str(page_path), format="PNG")
+                page_paths.append(str(page_path))
+                logger.debug(f"Saved PDF page {i+1} to {page_path}")
+
+            # Store additional pages for multi-page documents
+            self._additional_pages = page_paths[1:] if len(page_paths) > 1 else []
+
+            logger.info(
+                f"Simple PDF conversion saved: {len(page_paths)} pages "
+                f"(primary: {page_paths[0]})"
+            )
+            return Path(page_paths[0])
+
+        except ImportError:
+            logger.warning("pdf2image not available, using original PDF")
+            return input_path
+
     def _detect_and_correct_perspective(
         self,
         img: np.ndarray,

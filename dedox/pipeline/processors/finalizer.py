@@ -102,6 +102,22 @@ class Finalizer(BaseProcessor):
             if title and len(title) > 128:
                 title = title[:125] + "..."
 
+        # Sync OCR text to Paperless content field
+        # This updates the searchable text in Paperless with our extracted text
+        if context.ocr_text:
+            content_updated = await webhook_service.update_document_content(
+                paperless_id=context.paperless_id,
+                content=context.ocr_text
+            )
+            if content_updated:
+                logger.info(
+                    f"Synced {len(context.ocr_text)} chars of OCR text to Paperless"
+                )
+            else:
+                logger.warning(
+                    f"Failed to sync OCR text to Paperless for document {context.paperless_id}"
+                )
+
         # Finalize the document in Paperless
         await webhook_service.finalize_document_processing(
             paperless_id=context.paperless_id,
