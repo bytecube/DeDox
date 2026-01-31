@@ -520,6 +520,47 @@ class PaperlessWebhookService:
             logger.exception(f"Error updating document {paperless_id} metadata: {e}")
             return False
 
+    async def update_document_content(
+        self,
+        paperless_id: int,
+        content: str
+    ) -> bool:
+        """Update the document content (OCR text) in Paperless.
+
+        This overwrites the built-in OCR result with externally extracted text,
+        such as from a Vision-Language model.
+
+        Args:
+            paperless_id: Paperless document ID
+            content: The text content to set
+
+        Returns:
+            True if successful
+        """
+        try:
+            async with await self._get_client() as client:
+                response = await client.patch(
+                    f"/api/documents/{paperless_id}/",
+                    json={"content": content}
+                )
+
+                if response.status_code != 200:
+                    logger.error(
+                        f"Failed to update content for document {paperless_id}: "
+                        f"{response.status_code} - {response.text}"
+                    )
+                    return False
+
+            logger.info(
+                f"Updated content for document {paperless_id} "
+                f"({len(content)} characters)"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"Error updating content for document {paperless_id}: {e}")
+            return False
+
     async def finalize_document_processing(
         self,
         paperless_id: int,

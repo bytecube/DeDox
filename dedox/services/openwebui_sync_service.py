@@ -521,8 +521,63 @@ class OpenWebUISyncService:
         logger.warning(f"File {file_id} processing timeout after {max_wait}s")
         return False
 
+    async def _find_file_by_content_hash(
+        self, client: httpx.AsyncClient, headers: dict[str, str], kb_id: str, content_hash: str
+    ) -> str | None:
+        """Find a file in the knowledge base by its content hash.
+
+        Args:
+            client: HTTP client
+            headers: Request headers
+            kb_id: Knowledge base ID
+            content_hash: Content hash to search for
+
+        Returns:
+            File ID if found, None otherwise
+        """
+        try:
+            # Get knowledge base details including file list
+            response = await client.get(
+                f"{self.settings.openwebui.base_url}/api/v1/knowledge/{kb_id}",
+                headers=headers,
+            )
+
+            if response.status_code != 200:
+                return None
+
+            kb_data = response.json()
+            file_ids = kb_data.get("data", {}).get("file_ids", []) or kb_data.get("files", [])
+
+            # Check each file for matching content hash
+            for file_id in file_ids:
+                # Handle both string IDs and dict objects
+                fid = file_id if isinstance(file_id, str) else file_id.get("id")
+                if not fid:
+                    continue
+
+                file_response = await client.get(
+                    f"{self.settings.openwebui.base_url}/api/v1/files/{fid}",
+                    headers=headers,
+                )
+
+                if file_response.status_code == 200:
+                    file_data = file_response.json()
+                    file_hash = file_data.get("hash") or file_data.get("data", {}).get("hash")
+                    if file_hash == content_hash:
+                        logger.debug(f"Found file {fid} with matching content hash")
+                        return fid
+
+            return None
+
+        except Exception as e:
+            logger.warning(f"Error searching for file by content hash: {e}")
+            return None
+
     async def add_to_knowledge_base(self, file_id: str, kb_id: str | None = None) -> bool:
         """Add processed file to knowledge base.
+
+        If duplicate content is detected, removes the existing file and retries
+        to ensure the latest metadata is stored.
 
         Args:
             file_id: File ID to add
@@ -547,6 +602,64 @@ class OpenWebUISyncService:
                 if response.status_code in (200, 201):
                     logger.info(f"Added file {file_id} to knowledge base {kb_id}")
                     return True
+                elif response.status_code == 400:
+                    # Check if this is a duplicate content error
+                    response_text = response.text.lower()
+                    if "duplicate" in response_text or "already exists" in response_text:
+                        logger.info(
+                            f"Duplicate content detected for file {file_id}, "
+                            "removing existing file to update with new metadata"
+                        )
+
+                        # Extract content hash from error message if available
+                        # Format: "Document with hash XXXXX already exists"
+                        import re
+                        hash_match = re.search(r'hash\s+([a-f0-9]+)', response.text)
+                        content_hash = hash_match.group(1) if hash_match else None
+
+                        if content_hash:
+                            # Find and remove the existing file with this hash
+                            existing_file_id = await self._find_file_by_content_hash(
+                                client, headers, kb_id, content_hash
+                            )
+                            if existing_file_id:
+                                logger.info(f"Found existing file {existing_file_id} with same content hash")
+                                # Remove from KB
+                                await self.remove_file_from_knowledge_base(kb_id, existing_file_id)
+                                # Delete the old file
+                                await self.remove_document(existing_file_id)
+
+                                # Retry adding the new file
+                                retry_response = await client.post(
+                                    f"{self.settings.openwebui.base_url}/api/v1/knowledge/{kb_id}/file/add",
+                                    headers=headers,
+                                    json={"file_id": file_id},
+                                )
+
+                                if retry_response.status_code in (200, 201):
+                                    logger.info(
+                                        f"Successfully updated file {file_id} in knowledge base {kb_id}"
+                                    )
+                                    return True
+                                else:
+                                    logger.error(
+                                        f"Failed to add file after removing duplicate: "
+                                        f"{retry_response.status_code} - {retry_response.text}"
+                                    )
+                                    return False
+                            else:
+                                logger.warning(
+                                    f"Could not find existing file with hash {content_hash} to remove"
+                                )
+                                return False
+                        else:
+                            logger.warning("Duplicate content detected but could not extract hash")
+                            return False
+                    else:
+                        logger.error(
+                            f"Failed to add file to knowledge base: {response.status_code} - {response.text}"
+                        )
+                        return False
                 else:
                     logger.error(
                         f"Failed to add file to knowledge base: {response.status_code} - {response.text}"
@@ -622,6 +735,105 @@ class OpenWebUISyncService:
         except Exception as e:
             logger.exception(f"Error syncing document {doc.id} to Open WebUI: {e}")
             return False
+
+    async def find_files_by_filename(self, filename: str) -> list[dict[str, Any]]:
+        """Find existing files in Open WebUI by filename.
+
+        Args:
+            filename: Filename to search for (exact or partial match)
+
+        Returns:
+            List of matching file objects with id, filename, etc.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.openwebui.timeout_seconds) as client:
+                headers = await self._get_headers()
+
+                response = await client.get(
+                    f"{self.settings.openwebui.base_url}/api/v1/files/",
+                    headers=headers,
+                )
+
+                if response.status_code == 200:
+                    files = response.json()
+                    # Filter files matching the filename
+                    matching = [
+                        f for f in files
+                        if f.get("filename") == filename or f.get("meta", {}).get("name") == filename
+                    ]
+                    if matching:
+                        logger.debug(f"Found {len(matching)} existing files matching '{filename}'")
+                    return matching
+                else:
+                    logger.warning(f"Failed to list files: {response.status_code}")
+                    return []
+
+        except Exception as e:
+            logger.warning(f"Error searching for existing files: {e}")
+            return []
+
+    async def remove_file_from_knowledge_base(self, kb_id: str, file_id: str) -> bool:
+        """Remove a file from a knowledge base (without deleting the file itself).
+
+        Args:
+            kb_id: Knowledge base ID
+            file_id: File ID to remove from KB
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.openwebui.timeout_seconds) as client:
+                headers = await self._get_headers()
+
+                response = await client.post(
+                    f"{self.settings.openwebui.base_url}/api/v1/knowledge/{kb_id}/file/remove",
+                    headers=headers,
+                    json={"file_id": file_id},
+                )
+
+                if response.status_code in (200, 204):
+                    logger.info(f"Removed file {file_id} from knowledge base {kb_id}")
+                    return True
+                else:
+                    logger.warning(
+                        f"Failed to remove file from KB: {response.status_code} - {response.text}"
+                    )
+                    return False
+
+        except Exception as e:
+            logger.warning(f"Error removing file from KB: {e}")
+            return False
+
+    async def remove_existing_document(self, filename: str) -> bool:
+        """Find and remove existing document with the same filename.
+
+        This removes the file from the knowledge base and deletes it entirely,
+        allowing a new version with updated metadata to be uploaded.
+
+        Args:
+            filename: Filename to search for and remove
+
+        Returns:
+            True if file was found and removed, False otherwise
+        """
+        existing_files = await self.find_files_by_filename(filename)
+
+        if not existing_files:
+            return False
+
+        kb_id = await self.ensure_knowledge_base()
+
+        for file_info in existing_files:
+            file_id = file_info.get("id")
+            if file_id:
+                logger.info(f"Removing existing file '{filename}' (ID: {file_id}) to update with new metadata")
+                # Remove from KB first
+                await self.remove_file_from_knowledge_base(kb_id, file_id)
+                # Then delete the file
+                await self.remove_document(file_id)
+
+        return True
 
     async def remove_document(self, file_id: str) -> bool:
         """Remove a document from Open WebUI.

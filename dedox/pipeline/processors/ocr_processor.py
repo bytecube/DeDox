@@ -35,12 +35,22 @@ class OCRProcessor(BaseProcessor):
         return JobStage.OCR
     
     def can_process(self, context: ProcessorContext) -> bool:
-        """Check if we can process this document."""
+        """Check if we can process this document.
+
+        Skips OCR when a Vision-Language model is configured, as the VL model
+        will extract text directly from the image during metadata extraction.
+        """
+        # Skip OCR when VL model is active (VL model handles text extraction)
+        settings = get_settings()
+        if settings.llm.is_vision_model and settings.llm.skip_ocr_for_vl:
+            logger.info("Skipping OCR: Vision-Language model will extract text")
+            return False
+
         # Need a processed image file
         file_path = context.processed_file_path or context.original_file_path
         if not file_path:
             return False
-        
+
         path = Path(file_path)
         return path.exists()
     

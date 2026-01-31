@@ -71,7 +71,7 @@ image_processing:
 llm:
   provider: "ollama"
   base_url: "${DEDOX_OLLAMA_URL:http://ollama:11434}"
-  model: "${OLLAMA_MODEL:qwen2.5:14b}"
+  model: "${OLLAMA_MODEL:qwen3-vl:8b}"
   # Increased timeout to handle initial model loading and schema-constrained generation
   timeout_seconds: 600
   temperature: 0.1
@@ -80,6 +80,18 @@ llm:
   context_window: "${OLLAMA_CONTEXT_WINDOW:16384}"
   # Max characters of OCR text to send to LLM
   ocr_text_limit: "${OLLAMA_OCR_TEXT_LIMIT:8000}"
+
+  # Vision-Language model settings
+  vision_enabled: true
+  vision_model_patterns:
+    - "*-vl*"
+    - "*vision*"
+    - "*llava*"
+    - "*minicpm-v*"
+  max_image_size_pixels: 1024
+  image_quality: 75
+  disable_thinking: true  # Disable Qwen3 /no_think mode for direct answers
+  skip_ocr_for_vl: true  # Skip Tesseract OCR when using VL models
 
 paperless:
   base_url: "${DEDOX_PAPERLESS_URL:http://host.docker.internal:8080}"
