@@ -191,7 +191,7 @@ class LLMSettings(BaseModel):
 
     # Vision-Language model settings
     vision_enabled: bool = True
-    vision_model_patterns: list[str] = ["*-vl*", "*vision*", "*llava*", "*minicpm-v*"]
+    vision_model_patterns: list[str] = ["*-vl*", "*vl:*", "*vision*", "*llava*", "*minicpm-v*"]
     max_image_size_pixels: int = 1568
     image_quality: int = 85
     disable_thinking: bool = True

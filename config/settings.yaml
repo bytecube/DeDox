@@ -85,6 +85,7 @@ llm:
   vision_enabled: true
   vision_model_patterns:
     - "*-vl*"
+    - "*vl:*"
     - "*vision*"
     - "*llava*"
     - "*minicpm-v*"
