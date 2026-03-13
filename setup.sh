@@ -9,7 +9,7 @@ set -euo pipefail
 
 # ─── Colors & Formatting ───────────────────────────────────────────────────────
 
-if [ -t 1 ] || [ -t 2 ]; then
+if [ -t 1 ] || [ -t 2 ] || [ -e /dev/tty ]; then
     RED='\033[0;31m'
     GREEN='\033[0;32m'
     YELLOW='\033[0;33m'
@@ -167,6 +167,15 @@ check_prerequisites() {
     # Check docker
     if command -v docker &>/dev/null; then
         success "docker $(docker --version | awk '{print $3}' | tr -d ',')"
+        # Verify Docker daemon is running
+        if ! docker info &>/dev/null; then
+            error "Docker daemon is not running"
+            info "  Start it with: sudo systemctl start docker"
+            info "  Or check: sudo dockerd"
+            missing=1
+        else
+            success "docker daemon is running"
+        fi
     else
         error "docker is not installed"
         info "  Install: https://docs.docker.com/get-docker/"
@@ -282,7 +291,15 @@ run_wizard() {
     case "$model_choice" in
         1) OLLAMA_MODEL="qwen3-vl:8b" ;;
         2) OLLAMA_MODEL="qwen2.5:14b" ;;
-        3) OLLAMA_MODEL=$(ask "Enter model name (e.g., llama3:8b, mistral:7b)") ;;
+        3)
+            while true; do
+                OLLAMA_MODEL=$(ask "Enter model name (e.g., llama3:8b, mistral:7b)")
+                if [ -n "$OLLAMA_MODEL" ]; then
+                    break
+                fi
+                warn "Model name cannot be empty"
+            done
+            ;;
     esac
 
     # ── GPU detection ──
@@ -397,10 +414,12 @@ clone_repo() {
     fi
 
     info "Cloning from https://github.com/bytecube/DeDox.git..."
-    if git clone https://github.com/bytecube/DeDox.git "$INSTALL_DIR" 2>&1; then
+    local clone_output
+    if clone_output=$(git clone --quiet https://github.com/bytecube/DeDox.git "$INSTALL_DIR" 2>&1); then
         success "Repository cloned to $INSTALL_DIR"
     else
         error "Failed to clone repository"
+        [ -n "$clone_output" ] && error "$clone_output"
         info "Check your network connection and try again"
         exit 1
     fi
@@ -424,26 +443,35 @@ generate_env() {
     postgres_pass=$(generate_secret | cut -c1-24)
     webhook_secret=$(generate_secret)
 
-    # Helper to set a value in .env (handles both existing and commented-out keys)
+    # Helper to set a value in .env (handles existing, commented-out, and missing keys)
+    # Uses line-by-line rewrite to avoid sed escaping issues with special characters
     set_env() {
         local key="$1"
         local value="$2"
         local file="$env_file"
+        local tmp_file="${file}.tmp"
+        local found=false
 
-        # Escape special characters for sed
-        local escaped_value
-        escaped_value=$(printf '%s' "$value" | sed 's/[&/\]/\\&/g')
+        while IFS= read -r line || [ -n "$line" ]; do
+            if [[ "$line" =~ ^${key}= ]]; then
+                # Key exists uncommented — replace its value
+                echo "${key}=${value}"
+                found=true
+            elif [[ "$line" =~ ^[[:space:]]*#[[:space:]]*${key}= ]]; then
+                # Key exists but commented — uncomment and set value
+                echo "${key}=${value}"
+                found=true
+            else
+                echo "$line"
+            fi
+        done < "$file" > "$tmp_file"
 
-        if grep -q "^${key}=" "$file" 2>/dev/null; then
-            # Key exists uncommented — replace its value
-            sed -i "s|^${key}=.*|${key}=${escaped_value}|" "$file"
-        elif grep -q "^# *${key}=" "$file" 2>/dev/null; then
-            # Key exists but commented — uncomment and set value
-            sed -i "s|^# *${key}=.*|${key}=${escaped_value}|" "$file"
-        else
+        if [ "$found" = false ]; then
             # Key doesn't exist — append it
-            echo "${key}=${value}" >> "$file"
+            echo "${key}=${value}" >> "$tmp_file"
         fi
+
+        mv "$tmp_file" "$file"
     }
 
     # Security secrets
@@ -561,25 +589,38 @@ EOF
         fi
     fi
 
-    # ── DeDox service overrides (depends_on adjustments) ──
+    # ── DeDox service overrides (depends_on + environment) ──
+    # Build the dedox block as a complete unit to avoid fragile sed injection
     local needs_dedox_override=false
+    local dedox_env=""
     local dedox_depends=""
 
+    # External Ollama requires env override on dedox services
+    if [ "$OLLAMA_MODE" = "external" ]; then
+        needs_dedox_override=true
+        dedox_env="    environment:
+      - DEDOX_OLLAMA_URL=${OLLAMA_URL}"
+    fi
+
+    # Build depends_on based on which services are active
     if [ "$DEPLOY_MODE" = "full" ]; then
         # Full mode base depends_on: ollama, paperless, open-webui
         if [ "$OLLAMA_MODE" = "external" ] && [ "$OPENWEBUI_ENABLED" = "false" ]; then
             needs_dedox_override=true
-            dedox_depends="      paperless:
+            dedox_depends="    depends_on:
+      paperless:
         condition: service_healthy"
         elif [ "$OLLAMA_MODE" = "external" ]; then
             needs_dedox_override=true
-            dedox_depends="      paperless:
+            dedox_depends="    depends_on:
+      paperless:
         condition: service_healthy
       open-webui:
         condition: service_healthy"
         elif [ "$OPENWEBUI_ENABLED" = "false" ]; then
             needs_dedox_override=true
-            dedox_depends="      ollama:
+            dedox_depends="    depends_on:
+      ollama:
         condition: service_healthy
       paperless:
         condition: service_healthy"
@@ -588,43 +629,28 @@ EOF
         # Minimal mode base depends_on: ollama, open-webui
         if [ "$OLLAMA_MODE" = "external" ] && [ "$OPENWEBUI_ENABLED" = "false" ]; then
             needs_dedox_override=true
-            dedox_depends=""
+            dedox_depends="    depends_on: {}"
         elif [ "$OLLAMA_MODE" = "external" ]; then
             needs_dedox_override=true
-            dedox_depends="      open-webui:
+            dedox_depends="    depends_on:
+      open-webui:
         condition: service_healthy"
         elif [ "$OPENWEBUI_ENABLED" = "false" ]; then
             needs_dedox_override=true
-            dedox_depends="      ollama:
+            dedox_depends="    depends_on:
+      ollama:
         condition: service_healthy"
         fi
     fi
 
     if [ "$needs_dedox_override" = true ]; then
-        if [ -n "$dedox_depends" ]; then
-            cat >> "$override_file" << EOF
-  dedox:
-    depends_on:
-${dedox_depends}
-EOF
-        else
-            cat >> "$override_file" << 'EOF'
-  dedox:
-    depends_on: {}
-EOF
-        fi
+        echo "  dedox:" >> "$override_file"
+        [ -n "$dedox_env" ] && echo "$dedox_env" >> "$override_file"
+        [ -n "$dedox_depends" ] && echo "$dedox_depends" >> "$override_file"
     fi
 
-    # Add external Ollama URL to DeDox services
+    # Worker also needs external Ollama URL
     if [ "$OLLAMA_MODE" = "external" ]; then
-        # Only add environment if we didn't already create the dedox block
-        if [ "$needs_dedox_override" = true ]; then
-            # Append environment to existing dedox block - need to insert before next service
-            sed -i "/^  dedox:$/,/^  [a-z]/ {
-                /^    depends_on/i\\    environment:\\n      - DEDOX_OLLAMA_URL=${OLLAMA_URL}
-            }" "$override_file" 2>/dev/null || true
-        fi
-
         cat >> "$override_file" << EOF
   dedox-worker:
     environment:
@@ -635,11 +661,12 @@ EOF
     success "Override file generated"
 }
 
-# ─── Launch Services ───────────────────────────────────────────────────────────
+# ─── Compose Args Helper ──────────────────────────────────────────────────────
 
-launch_services() {
-    step "Launching DeDox"
+COMPOSE_ARGS=()
+COMPOSE_ARGS_DISPLAY=""
 
+build_compose_args() {
     local compose_file
     if [ "$DEPLOY_MODE" = "full" ]; then
         compose_file="docker-compose.yml"
@@ -647,10 +674,21 @@ launch_services() {
         compose_file="docker-compose.minimal.yml"
     fi
 
-    local compose_args="-f $compose_file"
+    COMPOSE_ARGS=(-f "$compose_file")
+    COMPOSE_ARGS_DISPLAY="-f $compose_file"
+
     if [ -f "$INSTALL_DIR/docker-compose.override.yml" ]; then
-        compose_args="$compose_args -f docker-compose.override.yml"
+        COMPOSE_ARGS+=(-f docker-compose.override.yml)
+        COMPOSE_ARGS_DISPLAY="$COMPOSE_ARGS_DISPLAY -f docker-compose.override.yml"
     fi
+}
+
+# ─── Launch Services ───────────────────────────────────────────────────────────
+
+launch_services() {
+    step "Launching DeDox"
+
+    build_compose_args
 
     info "Building and starting services..."
     info "This may take a few minutes on first run (downloading images & building)..."
@@ -659,11 +697,11 @@ launch_services() {
     cd "$INSTALL_DIR"
 
     # Build and start
-    if $COMPOSE_CMD $compose_args up -d --build 2>&1; then
+    if $COMPOSE_CMD "${COMPOSE_ARGS[@]}" up -d --build 2>&1; then
         success "All services started"
     else
         error "Failed to start services"
-        info "Check the logs with: cd $INSTALL_DIR && $COMPOSE_CMD $compose_args logs"
+        info "Check the logs with: cd $INSTALL_DIR && $COMPOSE_CMD $COMPOSE_ARGS_DISPLAY logs"
         exit 1
     fi
 }
@@ -692,25 +730,13 @@ wait_for_health() {
     printf "\n"
     warn "DeDox didn't respond within ${max_wait}s"
     info "Services may still be starting. Check logs with:"
-    info "  cd $INSTALL_DIR && $COMPOSE_CMD logs dedox"
+    info "  cd $INSTALL_DIR && $COMPOSE_CMD $COMPOSE_ARGS_DISPLAY logs dedox"
     echo
 }
 
 # ─── Final Output ─────────────────────────────────────────────────────────────
 
 show_complete() {
-    local compose_file
-    if [ "$DEPLOY_MODE" = "full" ]; then
-        compose_file="docker-compose.yml"
-    else
-        compose_file="docker-compose.minimal.yml"
-    fi
-
-    local compose_args="-f $compose_file"
-    if [ -f "$INSTALL_DIR/docker-compose.override.yml" ]; then
-        compose_args="$compose_args -f docker-compose.override.yml"
-    fi
-
     printf "\n"
     printf "${BOLD}${GREEN}"
     cat << 'DONE'
@@ -747,9 +773,9 @@ DONE
     printf "\n"
     printf "  ${BOLD}Useful commands:${RESET}\n"
     printf "    ${DIM}cd %s${RESET}\n" "$INSTALL_DIR"
-    printf "    ${DIM}$COMPOSE_CMD $compose_args logs -f${RESET}          ${DIM}# View logs${RESET}\n"
-    printf "    ${DIM}$COMPOSE_CMD $compose_args down${RESET}             ${DIM}# Stop services${RESET}\n"
-    printf "    ${DIM}$COMPOSE_CMD $compose_args up -d${RESET}            ${DIM}# Start again${RESET}\n"
+    printf "    ${DIM}$COMPOSE_CMD $COMPOSE_ARGS_DISPLAY logs -f${RESET}          ${DIM}# View logs${RESET}\n"
+    printf "    ${DIM}$COMPOSE_CMD $COMPOSE_ARGS_DISPLAY down${RESET}             ${DIM}# Stop services${RESET}\n"
+    printf "    ${DIM}$COMPOSE_CMD $COMPOSE_ARGS_DISPLAY up -d${RESET}            ${DIM}# Start again${RESET}\n"
 
     printf "\n"
     printf "  ${BOLD}Next steps:${RESET}\n"
