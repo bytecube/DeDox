@@ -122,10 +122,11 @@ choose() {
 }
 
 generate_secret() {
-    openssl rand -base64 32 2>/dev/null | tr -d '\n' || {
-        # Fallback if openssl is not available
+    if command -v openssl &>/dev/null; then
+        openssl rand -base64 32 | tr -d '\n'
+    else
         head -c 32 /dev/urandom | base64 | tr -d '\n'
-    }
+    fi
 }
 
 # ─── Banner ────────────────────────────────────────────────────────────────────
@@ -192,6 +193,15 @@ check_prerequisites() {
     else
         error "docker compose is not installed"
         info "  Install: https://docs.docker.com/compose/install/"
+        missing=1
+    fi
+
+    # Check curl (for health checks and connectivity tests)
+    if command -v curl &>/dev/null; then
+        success "curl available"
+    else
+        error "curl is not installed"
+        info "  Install: sudo apt install curl (Debian/Ubuntu) or sudo dnf install curl (Fedora)"
         missing=1
     fi
 
@@ -316,9 +326,7 @@ run_wizard() {
         else
             info "DeDox will auto-generate a token using admin credentials"
             PAPERLESS_USER=$(ask "Paperless admin username" "admin")
-            printf "${BOLD}Paperless admin password${RESET}: " > /dev/tty
-            read -rs PAPERLESS_PASS < /dev/tty
-            printf "\n" > /dev/tty
+            PAPERLESS_PASS=$(ask_password "Paperless admin password (min 8 characters)" 8)
         fi
     fi
 
@@ -399,18 +407,40 @@ clone_repo() {
     if [ -d "$INSTALL_DIR" ]; then
         if [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
             warn "Directory '$INSTALL_DIR' already exists with DeDox files"
-            if ! ask_yes_no "Use existing directory?" "y"; then
-                info "Setup cancelled."
-                exit 0
-            fi
-            return 0
-        else
-            warn "Directory '$INSTALL_DIR' already exists"
-            if ! ask_yes_no "Continue anyway? Files may be overwritten" "n"; then
-                info "Setup cancelled."
-                exit 0
+            if ask_yes_no "Use existing directory?" "y"; then
+                success "Using existing directory"
+                return 0
             fi
         fi
+
+        # Directory exists but isn't a DeDox install (or user declined reuse)
+        warn "Directory '$INSTALL_DIR' already exists"
+        local dir_choice
+        dir_choice=$(choose "How would you like to proceed?" \
+            "Remove it and clone fresh" \
+            "Choose a different directory" \
+            "Cancel setup")
+
+        case "$dir_choice" in
+            1)
+                info "Removing '$INSTALL_DIR'..."
+                rm -rf "$INSTALL_DIR"
+                ;;
+            2)
+                INSTALL_DIR=$(ask "Enter a new install directory")
+                if [ -z "$INSTALL_DIR" ]; then
+                    error "Directory cannot be empty"
+                    exit 1
+                fi
+                # Recursive call to handle the new path
+                clone_repo
+                return $?
+                ;;
+            3)
+                info "Setup cancelled."
+                exit 0
+                ;;
+        esac
     fi
 
     info "Cloning from https://github.com/bytecube/DeDox.git..."
@@ -433,6 +463,11 @@ generate_env() {
     local env_file="$INSTALL_DIR/.env"
 
     # Start from template
+    if [ ! -f "$INSTALL_DIR/.env.example" ]; then
+        error "Missing .env.example in $INSTALL_DIR"
+        info "The repository may be corrupted. Try removing the directory and running setup again."
+        exit 1
+    fi
     cp "$INSTALL_DIR/.env.example" "$env_file"
 
     # Generate secrets
