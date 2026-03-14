@@ -34,13 +34,16 @@ services:
       - DEDOX_LLM_PROVIDER=openai-compat
       - DEDOX_OLLAMA_URL=${DEDOX_OLLAMA_URL:-http://192.168.1.50:8080}
       - DEDOX_LLM_API_KEY=${DEDOX_LLM_API_KEY:-}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3.5-35b-a3b-q4.gguf}
       # Paperless-ngx (co-located in this compose stack)
       - DEDOX_PAPERLESS_URL=http://paperless:8000
       - DEDOX_PAPERLESS_TOKEN=${DEDOX_PAPERLESS_TOKEN:-}
       - PAPERLESS_ADMIN_USER=${PAPERLESS_ADMIN_USER:-admin}
       - PAPERLESS_ADMIN_PASSWORD=${PAPERLESS_ADMIN_PASSWORD:-admin}
+      # Webhook secret (optional, for HMAC verification)
+      - DEDOX_WEBHOOK_SECRET=${DEDOX_WEBHOOK_SECRET:-}
       # Open WebUI (external instance)
+      - DEDOX_OPENWEBUI_URL=${DEDOX_OPENWEBUI_URL:-http://192.168.1.50:3000}
       - DEDOX_OPENWEBUI_API_KEY=${DEDOX_OPENWEBUI_API_KEY:-}
       - OPENWEBUI_ADMIN_EMAIL=${OPENWEBUI_ADMIN_EMAIL:-admin@example.com}
       - OPENWEBUI_ADMIN_PASSWORD=${OPENWEBUI_ADMIN_PASSWORD:-}
@@ -50,7 +53,7 @@ services:
     networks:
       - dedox-network
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -74,13 +77,16 @@ services:
       - DEDOX_LLM_PROVIDER=openai-compat
       - DEDOX_OLLAMA_URL=${DEDOX_OLLAMA_URL:-http://192.168.1.50:8080}
       - DEDOX_LLM_API_KEY=${DEDOX_LLM_API_KEY:-}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3.5-35b-a3b-q4.gguf}
       # Paperless-ngx
       - DEDOX_PAPERLESS_URL=http://paperless:8000
       - DEDOX_PAPERLESS_TOKEN=${DEDOX_PAPERLESS_TOKEN:-}
       - PAPERLESS_ADMIN_USER=${PAPERLESS_ADMIN_USER:-admin}
       - PAPERLESS_ADMIN_PASSWORD=${PAPERLESS_ADMIN_PASSWORD:-admin}
+      # Webhook secret (optional, for HMAC verification)
+      - DEDOX_WEBHOOK_SECRET=${DEDOX_WEBHOOK_SECRET:-}
       # Open WebUI (external instance)
+      - DEDOX_OPENWEBUI_URL=${DEDOX_OPENWEBUI_URL:-http://192.168.1.50:3000}
       - DEDOX_OPENWEBUI_API_KEY=${DEDOX_OPENWEBUI_API_KEY:-}
       - OPENWEBUI_ADMIN_EMAIL=${OPENWEBUI_ADMIN_EMAIL:-admin@example.com}
       - OPENWEBUI_ADMIN_PASSWORD=${OPENWEBUI_ADMIN_PASSWORD:-}

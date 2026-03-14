@@ -157,8 +157,8 @@ database:
 openwebui:
   # Enable/disable Open WebUI sync
   enabled: true
-  # Base URL for Open WebUI API (internal container address)
-  base_url: "http://open-webui:8080"
+  # Base URL for Open WebUI API (internal container address or external URL)
+  base_url: "${DEDOX_OPENWEBUI_URL:http://open-webui:8080}"
   # Frontend port for external access
   frontend_port: 3000
   # API authentication - leave empty to auto-generate using admin credentials

@@ -26,6 +26,7 @@ services:
       - DEDOX_LLM_PROVIDER=${DEDOX_LLM_PROVIDER:-ollama}
       - DEDOX_OLLAMA_URL=http://ollama:11434
       - DEDOX_LLM_API_KEY=${DEDOX_LLM_API_KEY:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3-vl:8b}
       # Paperless admin credentials for auto token generation (for external Paperless)
       - PAPERLESS_ADMIN_USER=${PAPERLESS_ADMIN_USER:-admin}
       - PAPERLESS_ADMIN_PASSWORD=${PAPERLESS_ADMIN_PASSWORD:-}
@@ -63,6 +64,7 @@ services:
       - DEDOX_LLM_PROVIDER=${DEDOX_LLM_PROVIDER:-ollama}
       - DEDOX_OLLAMA_URL=http://ollama:11434
       - DEDOX_LLM_API_KEY=${DEDOX_LLM_API_KEY:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3-vl:8b}
       # Paperless admin credentials for auto token generation (for external Paperless)
       - PAPERLESS_ADMIN_USER=${PAPERLESS_ADMIN_USER:-admin}
       - PAPERLESS_ADMIN_PASSWORD=${PAPERLESS_ADMIN_PASSWORD:-}

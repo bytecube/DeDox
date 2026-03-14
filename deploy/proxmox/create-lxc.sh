@@ -13,17 +13,17 @@
 
 set -euo pipefail
 
-# --- Configuration ---
-CT_HOSTNAME="dedox"
-CT_MEMORY=4096
-CT_SWAP=1024
-CT_CORES=2
-CT_DISK_SIZE=64
-CT_STORAGE="local-lvm"
-CT_BRIDGE="vmbr0"
-CT_IP="192.168.1.51/24"
-CT_GATEWAY="192.168.1.1"
-CT_NAMESERVER="192.168.1.1"
+# --- Configuration (override via environment variables) ---
+CT_HOSTNAME="${CT_HOSTNAME:-dedox}"
+CT_MEMORY="${CT_MEMORY:-4096}"
+CT_SWAP="${CT_SWAP:-1024}"
+CT_CORES="${CT_CORES:-2}"
+CT_DISK_SIZE="${CT_DISK_SIZE:-64}"
+CT_STORAGE="${CT_STORAGE:-local-lvm}"
+CT_BRIDGE="${CT_BRIDGE:-vmbr0}"
+CT_IP="${CT_IP:-192.168.1.51/24}"
+CT_GATEWAY="${CT_GATEWAY:-192.168.1.1}"
+CT_NAMESERVER="${CT_NAMESERVER:-192.168.1.1}"
 
 # --- Pre-flight checks ---
 if ! command -v pct &> /dev/null; then

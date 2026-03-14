@@ -1286,14 +1286,9 @@ Read ALL text visible in the document carefully."""
                             ],
                             "stream": False,
                             "temperature": settings.llm.temperature,
-                            "response_format": {
-                                "type": "json_schema",
-                                "json_schema": {
-                                    "name": "extraction",
-                                    "strict": True,
-                                    "schema": json_schema
-                                }
-                            }
+                            # json_object mode + top-level schema for llama.cpp grammar constraint
+                            "response_format": {"type": "json_object"},
+                            "json_schema": json_schema,
                         }
                     )
 
@@ -1377,14 +1372,9 @@ Read ALL text visible in the document carefully."""
                             ],
                             "stream": False,
                             "temperature": settings.llm.temperature,
-                            "response_format": {
-                                "type": "json_schema",
-                                "json_schema": {
-                                    "name": "extraction",
-                                    "strict": True,
-                                    "schema": json_schema
-                                }
-                            }
+                            # json_object mode + top-level schema for llama.cpp grammar constraint
+                            "response_format": {"type": "json_object"},
+                            "json_schema": json_schema,
                         }
                     )
 

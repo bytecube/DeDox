@@ -30,7 +30,7 @@ prompt() {
 
     local input
     read -r input
-    eval "$var_name=\"${input:-$default_value}\""
+    printf -v "$var_name" '%s' "${input:-$default_value}"
 }
 
 generate_password() {
@@ -142,7 +142,7 @@ else
 fi
 
 OLLAMA_MODEL=""
-prompt OLLAMA_MODEL "Model name" "${DETECTED_MODEL:-}"
+prompt OLLAMA_MODEL "Model name" "${DETECTED_MODEL:-qwen3.5-35b-a3b-q4.gguf}"
 
 DEDOX_LLM_API_KEY=""
 prompt DEDOX_LLM_API_KEY "API key (empty if no auth)" ""
@@ -163,7 +163,7 @@ prompt PAPERLESS_URL "Paperless external URL" "http://${LXC_IP}:8080"
 
 echo ""
 echo "--- Open WebUI Integration ---"
-echo "(Your existing Open WebUI at 192.168.1.50)"
+echo "(Your existing Open WebUI instance for RAG sync)"
 echo ""
 OPENWEBUI_URL=""
 prompt OPENWEBUI_URL "Open WebUI URL" "http://192.168.1.50:3000"
@@ -181,9 +181,6 @@ if [ ! -d "./config" ]; then
     echo "Copying config files..."
     cp -r "$INSTALL_DIR/config" ./config
 fi
-
-# Patch Open WebUI URL in settings.yaml
-sed -i "s|base_url: \"http://open-webui:8080\"|base_url: \"${OPENWEBUI_URL}\"|" ./config/settings.yaml
 
 # --- Write .env ---
 echo ""
@@ -208,6 +205,7 @@ DEDOX_ADMIN_PASSWORD=${DEDOX_ADMIN_PASSWORD}
 # =============================================================================
 # LLM (llama.cpp)
 # =============================================================================
+DEDOX_LLM_PROVIDER=openai-compat
 DEDOX_OLLAMA_URL=${DEDOX_OLLAMA_URL}
 OLLAMA_MODEL=${OLLAMA_MODEL}
 DEDOX_LLM_API_KEY=${DEDOX_LLM_API_KEY}
@@ -223,9 +221,15 @@ PAPERLESS_URL=${PAPERLESS_URL}
 # =============================================================================
 # OPEN WEBUI
 # =============================================================================
+DEDOX_OPENWEBUI_URL=${OPENWEBUI_URL}
 DEDOX_OPENWEBUI_API_KEY=${DEDOX_OPENWEBUI_API_KEY}
 OPENWEBUI_ADMIN_EMAIL=${OPENWEBUI_ADMIN_EMAIL}
 OPENWEBUI_ADMIN_PASSWORD=${OPENWEBUI_ADMIN_PASSWORD}
+
+# =============================================================================
+# WEBHOOKS (optional)
+# =============================================================================
+DEDOX_WEBHOOK_SECRET=
 ENVEOF
 
 echo "Configuration saved to: $DEPLOY_DIR/.env"
