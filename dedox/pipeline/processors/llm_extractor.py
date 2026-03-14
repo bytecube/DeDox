@@ -449,8 +449,14 @@ class LLMExtractor(BaseProcessor):
     def sender_matcher(self) -> SenderMatcher:
         """Lazy initialization of sender matcher."""
         if self._sender_matcher is None:
-            self._sender_matcher = SenderMatcher(self._call_ollama)
+            self._sender_matcher = SenderMatcher(self._call_llm_generate)
         return self._sender_matcher
+
+    async def _call_llm_generate(self, prompt: str, settings) -> str:
+        """Provider-aware generate call (used by SenderMatcher)."""
+        if settings.llm.provider == "openai-compat":
+            return await self._call_openai_generate(prompt, settings)
+        return await self._call_ollama(prompt, settings)
 
     @property
     def stage(self) -> JobStage:
@@ -597,8 +603,8 @@ class LLMExtractor(BaseProcessor):
             values=", ".join(allowed_values) if allowed_values else "",
         )
         
-        # Call Ollama
-        response = await self._call_ollama(prompt, settings)
+        # Call LLM
+        response = await self._call_llm_generate(prompt, settings)
         
         # Parse response based on type
         value = self._parse_response(response, field_type, allowed_values)
@@ -634,9 +640,12 @@ class LLMExtractor(BaseProcessor):
         prompt = self._build_structured_prompt(fields, ocr_text, settings)
         logger.debug(f"Extraction prompt ({len(prompt)} chars): {prompt[:500]}...")
 
-        # Call Ollama Chat API with schema-constrained output
+        # Call LLM with schema-constrained output
         try:
-            response_json = await self._call_ollama_chat(prompt, json_schema, settings)
+            if settings.llm.provider == "openai-compat":
+                response_json = await self._call_openai_chat(prompt, json_schema, settings)
+            else:
+                response_json = await self._call_ollama_chat(prompt, json_schema, settings)
 
             # Parse and validate the response
             extracted = {}
@@ -739,12 +748,20 @@ Read ALL text visible in ALL pages carefully. Combine text from all pages in rea
 Read ALL text visible in the document carefully."""
 
         # Call VL model with all images
-        response_json = await self._call_ollama_chat_vl(
-            prompt,
-            json_schema,
-            encoded_images,
-            settings
-        )
+        if settings.llm.provider == "openai-compat":
+            response_json = await self._call_openai_chat_vl(
+                prompt,
+                json_schema,
+                encoded_images,
+                settings
+            )
+        else:
+            response_json = await self._call_ollama_chat_vl(
+                prompt,
+                json_schema,
+                encoded_images,
+                settings
+            )
 
         # Extract OCR text
         ocr_text = response_json.get("ocr_text", "")
@@ -1211,7 +1228,246 @@ Read ALL text visible in the document carefully."""
                     )
         
         raise LLMError("Max retries exceeded")
-    
+
+    # --- OpenAI-compatible API methods (for llama.cpp, vLLM, etc.) ---
+
+    def _openai_headers(self, settings) -> dict:
+        """Build headers for OpenAI-compatible API requests."""
+        headers = {"Content-Type": "application/json"}
+        if settings.llm.api_key:
+            headers["Authorization"] = f"Bearer {settings.llm.api_key}"
+        return headers
+
+    def _openai_parse_response(self, result: dict) -> str:
+        """Extract content from OpenAI-compatible chat completion response."""
+        choices = result.get("choices", [])
+        if not choices:
+            raise LLMError("Empty choices in OpenAI-compatible response")
+        return choices[0].get("message", {}).get("content", "").strip()
+
+    async def _call_openai_chat(
+        self,
+        user_prompt: str,
+        json_schema: dict,
+        settings
+    ) -> dict:
+        """Call OpenAI-compatible Chat API with structured JSON output.
+
+        Compatible with llama.cpp server, vLLM, and other OpenAI API-compatible servers.
+        """
+        schema_size = len(json.dumps(json_schema))
+        prompt_size = len(user_prompt)
+        system_prompt_size = len(EXTRACTION_SYSTEM_PROMPT)
+
+        logger.info(
+            f"OpenAI-compat chat request: model={settings.llm.model}, "
+            f"system_prompt={system_prompt_size} chars, "
+            f"user_prompt={prompt_size} chars, "
+            f"schema={schema_size} chars, "
+            f"timeout={settings.llm.timeout_seconds}s"
+        )
+
+        headers = self._openai_headers(settings)
+
+        async with httpx.AsyncClient(
+            timeout=settings.llm.timeout_seconds
+        ) as client:
+            for attempt in range(settings.llm.max_retries):
+                try:
+                    logger.info(f"Sending OpenAI-compat chat request (attempt {attempt + 1}/{settings.llm.max_retries})...")
+                    response = await client.post(
+                        f"{settings.llm.base_url}/v1/chat/completions",
+                        headers=headers,
+                        json={
+                            "model": settings.llm.model,
+                            "messages": [
+                                {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+                                {"role": "user", "content": user_prompt}
+                            ],
+                            "stream": False,
+                            "temperature": settings.llm.temperature,
+                            "response_format": {
+                                "type": "json_schema",
+                                "json_schema": {
+                                    "name": "extraction",
+                                    "strict": True,
+                                    "schema": json_schema
+                                }
+                            }
+                        }
+                    )
+
+                    if response.status_code != 200:
+                        raise LLMError(
+                            f"OpenAI-compat API error: {response.status_code} - {response.text}"
+                        )
+
+                    result = response.json()
+                    response_text = self._openai_parse_response(result)
+
+                    logger.info(f"Raw LLM response: {response_text}")
+
+                    try:
+                        parsed = json.loads(response_text)
+                        logger.info(f"Parsed LLM response: {parsed}")
+                        return parsed
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Failed to parse JSON response: {e}")
+                        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                        if json_match:
+                            return json.loads(json_match.group())
+                        raise LLMError(f"Invalid JSON response: {response_text[:200]}")
+
+                except httpx.TimeoutException:
+                    if attempt < settings.llm.max_retries - 1:
+                        logger.warning(f"OpenAI-compat timeout, retrying ({attempt + 1})")
+                        continue
+                    raise LLMError("OpenAI-compat request timed out")
+
+                except httpx.ConnectError:
+                    raise LLMError(
+                        f"Cannot connect to LLM server at {settings.llm.base_url}"
+                    )
+
+        raise LLMError("Max retries exceeded")
+
+    async def _call_openai_chat_vl(
+        self,
+        user_prompt: str,
+        json_schema: dict,
+        images_base64: list[str],
+        settings
+    ) -> dict:
+        """Call OpenAI-compatible Chat API with vision/image input.
+
+        Images are passed as data URIs in the content array.
+        """
+        total_image_size = sum(len(img) for img in images_base64)
+        logger.info(
+            f"OpenAI-compat VL chat request: model={settings.llm.model}, "
+            f"images={len(images_base64)}, "
+            f"total_image_size={total_image_size} chars"
+        )
+
+        system_prompt = VL_EXTRACTION_SYSTEM_PROMPT if settings.llm.disable_thinking else VL_EXTRACTION_SYSTEM_PROMPT.replace("/no_think\n\n", "")
+        headers = self._openai_headers(settings)
+
+        # Build content array with text + images
+        content = [{"type": "text", "text": user_prompt}]
+        for img_b64 in images_base64:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{img_b64}"}
+            })
+
+        async with httpx.AsyncClient(
+            timeout=settings.llm.timeout_seconds
+        ) as client:
+            for attempt in range(settings.llm.max_retries):
+                try:
+                    logger.info(f"Sending OpenAI-compat VL request (attempt {attempt + 1}/{settings.llm.max_retries})...")
+                    response = await client.post(
+                        f"{settings.llm.base_url}/v1/chat/completions",
+                        headers=headers,
+                        json={
+                            "model": settings.llm.model,
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": content}
+                            ],
+                            "stream": False,
+                            "temperature": settings.llm.temperature,
+                            "response_format": {
+                                "type": "json_schema",
+                                "json_schema": {
+                                    "name": "extraction",
+                                    "strict": True,
+                                    "schema": json_schema
+                                }
+                            }
+                        }
+                    )
+
+                    if response.status_code != 200:
+                        raise LLMError(
+                            f"OpenAI-compat VL API error: {response.status_code} - {response.text}"
+                        )
+
+                    result = response.json()
+                    response_text = self._openai_parse_response(result)
+
+                    logger.info(f"Raw VL response length: {len(response_text)} chars")
+
+                    try:
+                        parsed = json.loads(response_text)
+                        return parsed
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Failed to parse VL JSON response: {e}")
+                        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                        if json_match:
+                            return json.loads(json_match.group())
+                        raise LLMError(f"Invalid JSON response from VL model: {response_text[:200]}")
+
+                except httpx.TimeoutException:
+                    if attempt < settings.llm.max_retries - 1:
+                        logger.warning(f"OpenAI-compat VL timeout, retrying ({attempt + 1})")
+                        continue
+                    raise LLMError("OpenAI-compat VL request timed out")
+
+                except httpx.ConnectError:
+                    raise LLMError(
+                        f"Cannot connect to LLM server at {settings.llm.base_url}"
+                    )
+
+        raise LLMError("Max retries exceeded for VL request")
+
+    async def _call_openai_generate(self, prompt: str, settings) -> str:
+        """Call OpenAI-compatible API for simple text generation.
+
+        Wraps the prompt as a chat completion since OpenAI API has no /generate endpoint.
+        Used by SenderMatcher for correspondent matching.
+        """
+        headers = self._openai_headers(settings)
+
+        async with httpx.AsyncClient(
+            timeout=settings.llm.timeout_seconds
+        ) as client:
+            for attempt in range(settings.llm.max_retries):
+                try:
+                    response = await client.post(
+                        f"{settings.llm.base_url}/v1/chat/completions",
+                        headers=headers,
+                        json={
+                            "model": settings.llm.model,
+                            "messages": [
+                                {"role": "user", "content": prompt}
+                            ],
+                            "stream": False,
+                            "temperature": settings.llm.temperature,
+                        }
+                    )
+
+                    if response.status_code != 200:
+                        raise LLMError(
+                            f"OpenAI-compat API error: {response.status_code} - {response.text}"
+                        )
+
+                    result = response.json()
+                    return self._openai_parse_response(result)
+
+                except httpx.TimeoutException:
+                    if attempt < settings.llm.max_retries - 1:
+                        logger.warning(f"OpenAI-compat timeout, retrying ({attempt + 1})")
+                        continue
+                    raise LLMError("OpenAI-compat request timed out")
+
+                except httpx.ConnectError:
+                    raise LLMError(
+                        f"Cannot connect to LLM server at {settings.llm.base_url}"
+                    )
+
+        raise LLMError("Max retries exceeded")
+
     def _parse_response(
         self,
         response: str,

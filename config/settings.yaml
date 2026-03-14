@@ -69,8 +69,11 @@ image_processing:
   hough_max_line_gap: 10
 
 llm:
-  provider: "ollama"
+  # Provider: "ollama" (default) or "openai-compat" (for llama.cpp, vLLM, etc.)
+  provider: "${DEDOX_LLM_PROVIDER:ollama}"
   base_url: "${DEDOX_OLLAMA_URL:http://ollama:11434}"
+  # API key for authenticated endpoints (openai-compat provider)
+  api_key: "${DEDOX_LLM_API_KEY:}"
   model: "${OLLAMA_MODEL:qwen3-vl:8b}"
   # Increased timeout to handle initial model loading and schema-constrained generation
   timeout_seconds: 600

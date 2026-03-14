@@ -176,9 +176,15 @@ class ImageProcessingSettings(BaseModel):
 
 
 class LLMSettings(BaseModel):
-    """LLM provider configuration."""
+    """LLM provider configuration.
+
+    Supported providers:
+    - "ollama": Ollama API (/api/chat, /api/generate)
+    - "openai-compat": OpenAI-compatible API (/v1/chat/completions), e.g. llama.cpp
+    """
     provider: str = "ollama"
     base_url: str = "http://ollama:11434"
+    api_key: str = ""
     model: str = "qwen3-vl:8b"
     # Increased timeout to handle initial model loading and complex extractions
     timeout_seconds: int = 600
