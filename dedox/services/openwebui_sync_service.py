@@ -5,8 +5,8 @@ Handles uploading documents and metadata to Open WebUI knowledge bases.
 """
 
 import asyncio
-import json
 import logging
+import mimetypes
 from pathlib import Path
 from typing import Any
 
@@ -354,112 +354,43 @@ class OpenWebUISyncService:
                     logger.error(f"Failed to connect to Open WebUI: {e}")
                     raise Exception(f"Failed to connect to Open WebUI: {e}")
 
-    async def format_document_markdown(self, doc: Document, paperless_metadata: dict[str, Any]) -> str:
-        """Format document with metadata as markdown with frontmatter.
-
-        Args:
-            doc: Document model
-            paperless_metadata: Metadata from Paperless API
-
-        Returns:
-            Formatted markdown string
-        """
-        # Parse DeDox extracted metadata
-        metadata = json.loads(doc.metadata) if doc.metadata else {}
-
-        # Build frontmatter
-        frontmatter_data = {
-            "title": paperless_metadata.get("title", doc.original_filename),
-            "paperless_id": doc.paperless_id,
-            "source": "paperless-ngx",
-            "created_at": doc.created_at,
-        }
-
-        # Add DeDox extracted metadata
-        if metadata:
-            for key, value in metadata.items():
-                # Truncate long values
-                if isinstance(value, str) and len(value) > 200:
-                    value = value[:200] + "..."
-                frontmatter_data[key] = value
-
-        # Add Paperless metadata
-        if paperless_metadata.get("correspondent"):
-            frontmatter_data["correspondent"] = paperless_metadata["correspondent"]
-        if paperless_metadata.get("document_type"):
-            frontmatter_data["document_type"] = paperless_metadata["document_type"]
-        if paperless_metadata.get("tags"):
-            frontmatter_data["tags"] = paperless_metadata["tags"]
-
-        # Build frontmatter YAML
-        frontmatter_lines = ["---"]
-        for key, value in frontmatter_data.items():
-            if value is not None:
-                # Simple YAML formatting
-                if isinstance(value, (list, tuple)):
-                    frontmatter_lines.append(f"{key}:")
-                    for item in value:
-                        frontmatter_lines.append(f"  - {item}")
-                elif isinstance(value, str):
-                    # Escape quotes
-                    escaped = value.replace('"', '\\"')
-                    frontmatter_lines.append(f'{key}: "{escaped}"')
-                else:
-                    frontmatter_lines.append(f"{key}: {value}")
-        frontmatter_lines.append("---")
-        frontmatter_lines.append("")
-
-        # Get OCR text
-        ocr_text = doc.ocr_text or paperless_metadata.get("content", "")
-
-        # Combine
-        markdown = "\n".join(frontmatter_lines)
-        markdown += f"# {frontmatter_data['title']}\n\n"
-        markdown += ocr_text
-
-        return markdown
-
     async def upload_document(
         self, file_path: Path, metadata: dict[str, Any], filename: str | None = None
     ) -> str | None:
-        """Upload document content to Open WebUI as text.
+        """Upload document binary to Open WebUI.
 
         Args:
-            file_path: Path to document file (not used - we send text content instead)
-            metadata: Document metadata including 'content' with OCR text
-            filename: Optional override filename
+            file_path: Path to the document file on disk
+            metadata: Document metadata (unused for upload, kept for API compatibility)
+            filename: Optional override filename (preserves original extension)
 
         Returns:
             File ID or None on failure
         """
-        # Extract text content from metadata
-        content = metadata.get("content", "")
-
-        if not content:
-            logger.error("No content available in document metadata")
+        if not file_path or not file_path.exists():
+            logger.error(f"Document file not found: {file_path}")
             return None
+
+        upload_filename = filename or file_path.name
+        mime_type = mimetypes.guess_type(upload_filename)[0] or "application/octet-stream"
 
         try:
             async with httpx.AsyncClient(timeout=self.settings.openwebui.timeout_seconds) as client:
-                # Get headers with automatic API key generation
                 headers = await self._get_headers()
-                # Remove Content-Type for multipart form data upload
                 headers.pop("Content-Type", None)
 
-                # Create text file with content
-                text_filename = (filename or file_path.name).replace(".pdf", ".txt")
-                files = {"file": (text_filename, content.encode('utf-8'), "text/plain")}
-                response = await client.post(
-                    f"{self.settings.openwebui.base_url}/api/v1/files/",
-                    headers=headers,
-                    files=files,
-                    params={"process": "true"},
-                )
+                with open(file_path, "rb") as f:
+                    files = {"file": (upload_filename, f, mime_type)}
+                    response = await client.post(
+                        f"{self.settings.openwebui.base_url}/api/v1/files/",
+                        headers=headers,
+                        files=files,
+                    )
 
                 if response.status_code in (200, 201):
                     result = response.json()
                     file_id = result.get("id")
-                    logger.info(f"Uploaded document to Open WebUI: {file_id}")
+                    logger.info(f"Uploaded '{upload_filename}' ({mime_type}) to Open WebUI: {file_id}")
                     return file_id
                 else:
                     logger.error(
@@ -692,8 +623,12 @@ class OpenWebUISyncService:
             logger.debug("Open WebUI sync is disabled")
             return False
 
+        if not file_path or not file_path.exists():
+            logger.error(f"Cannot sync document {doc.id}: file not found at {file_path}")
+            return False
+
         try:
-            # Upload document
+            # Upload document binary
             file_id = await self.upload_document(
                 file_path, paperless_metadata, filename=doc.original_filename
             )
@@ -701,26 +636,10 @@ class OpenWebUISyncService:
             if not file_id:
                 return False
 
-            # Give Open WebUI time to process the file (even with process=true, it may return early)
+            # Give Open WebUI time to extract text and build embeddings asynchronously
             wait_time = self.settings.openwebui.file_processing_wait
-            logger.info(f"Waiting {wait_time} seconds for file {file_id} to be processed...")
+            logger.info(f"Waiting {wait_time}s for Open WebUI to process file {file_id}...")
             await asyncio.sleep(wait_time)
-
-            # Verify file has content before adding to knowledge base
-            async with httpx.AsyncClient(timeout=self.settings.openwebui.timeout_seconds) as client:
-                headers = await self._get_headers()
-                file_response = await client.get(
-                    f"{self.settings.openwebui.base_url}/api/v1/files/{file_id}",
-                    headers=headers,
-                )
-
-                if file_response.status_code == 200:
-                    file_data = file_response.json()
-                    content = file_data.get("data", {}).get("content", "")
-                    if not content:
-                        logger.error(f"File {file_id} has no content after processing, skipping")
-                        return False
-                    logger.info(f"File {file_id} has {len(content)} characters of content")
 
             # Add to knowledge base
             added = await self.add_to_knowledge_base(file_id)
