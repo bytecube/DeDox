@@ -7,6 +7,7 @@ Handles uploading documents and metadata to Open WebUI knowledge bases.
 import asyncio
 import logging
 import mimetypes
+import re
 from pathlib import Path
 from typing import Any
 
@@ -354,15 +355,12 @@ class OpenWebUISyncService:
                     logger.error(f"Failed to connect to Open WebUI: {e}")
                     raise Exception(f"Failed to connect to Open WebUI: {e}")
 
-    async def upload_document(
-        self, file_path: Path, metadata: dict[str, Any], filename: str | None = None
-    ) -> str | None:
+    async def upload_document(self, file_path: Path, filename: str | None = None) -> str | None:
         """Upload document binary to Open WebUI.
 
         Args:
             file_path: Path to the document file on disk
-            metadata: Document metadata (unused for upload, kept for API compatibility)
-            filename: Optional override filename (preserves original extension)
+            filename: Optional display filename (preserves original extension for MIME detection)
 
         Returns:
             File ID or None on failure
@@ -372,20 +370,31 @@ class OpenWebUISyncService:
             return None
 
         upload_filename = filename or file_path.name
-        mime_type = mimetypes.guess_type(upload_filename)[0] or "application/octet-stream"
+        # Derive MIME type from extension; fall back via actual path suffix if display
+        # name has no extension (e.g. original_filename without dot)
+        mime_type = (
+            mimetypes.guess_type(upload_filename)[0]
+            or mimetypes.guess_type(file_path.name)[0]
+            or "application/octet-stream"
+        )
 
         try:
+            # Read bytes off the event loop thread to avoid blocking uvicorn workers
+            content = await asyncio.to_thread(file_path.read_bytes)
+
             async with httpx.AsyncClient(timeout=self.settings.openwebui.timeout_seconds) as client:
                 headers = await self._get_headers()
                 headers.pop("Content-Type", None)
 
-                with open(file_path, "rb") as f:
-                    files = {"file": (upload_filename, f, mime_type)}
-                    response = await client.post(
-                        f"{self.settings.openwebui.base_url}/api/v1/files/",
-                        headers=headers,
-                        files=files,
-                    )
+                files = {"file": (upload_filename, content, mime_type)}
+                # process=true instructs Open WebUI to start text extraction immediately
+                # rather than deferring it; the subsequent sleep still gives it time to finish
+                response = await client.post(
+                    f"{self.settings.openwebui.base_url}/api/v1/files/",
+                    headers=headers,
+                    files=files,
+                    params={"process": "true"},
+                )
 
                 if response.status_code in (200, 201):
                     result = response.json()
@@ -544,7 +553,6 @@ class OpenWebUISyncService:
 
                         # Extract content hash from error message if available
                         # Format: "Document with hash XXXXX already exists"
-                        import re
                         hash_match = re.search(r'hash\s+([a-f0-9]+)', response.text)
                         content_hash = hash_match.group(1) if hash_match else None
 
@@ -629,9 +637,7 @@ class OpenWebUISyncService:
 
         try:
             # Upload document binary
-            file_id = await self.upload_document(
-                file_path, paperless_metadata, filename=doc.original_filename
-            )
+            file_id = await self.upload_document(file_path, filename=doc.original_filename)
 
             if not file_id:
                 return False
