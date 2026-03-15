@@ -879,6 +879,10 @@ Read ALL text visible in the document carefully."""
                             "format": json_schema,
                             "options": {
                                 "temperature": settings.llm.temperature,
+                                "top_p": settings.llm.top_p,
+                                "top_k": settings.llm.top_k,
+                                "min_p": settings.llm.min_p,
+                                "presence_penalty": settings.llm.presence_penalty,
                                 "num_ctx": settings.llm.context_window,
                             }
                         }
@@ -1079,6 +1083,10 @@ Read ALL text visible in the document carefully."""
                             "format": json_schema,  # Schema-constrained output
                             "options": {
                                 "temperature": settings.llm.temperature,
+                                "top_p": settings.llm.top_p,
+                                "top_k": settings.llm.top_k,
+                                "min_p": settings.llm.min_p,
+                                "presence_penalty": settings.llm.presence_penalty,
                                 "num_ctx": settings.llm.context_window,
                             }
                         }
@@ -1203,6 +1211,10 @@ Read ALL text visible in the document carefully."""
                             "stream": False,
                             "options": {
                                 "temperature": settings.llm.temperature,
+                                "top_p": settings.llm.top_p,
+                                "top_k": settings.llm.top_k,
+                                "min_p": settings.llm.min_p,
+                                "presence_penalty": settings.llm.presence_penalty,
                                 "num_ctx": settings.llm.context_window,
                             }
                         }
@@ -1412,6 +1424,10 @@ Read ALL text visible in the document carefully."""
                             ],
                             "stream": False,
                             "temperature": settings.llm.temperature,
+                            "top_p": settings.llm.top_p,
+                            "top_k": settings.llm.top_k,
+                            "min_p": settings.llm.min_p,
+                            "presence_penalty": settings.llm.presence_penalty,
                             "max_tokens": 2048,
                             "response_format": {"type": "json_object"},
                         }
@@ -1564,6 +1580,10 @@ Read ALL text visible in the document carefully."""
                             ],
                             "stream": False,
                             "temperature": settings.llm.temperature,
+                            "top_p": settings.llm.top_p,
+                            "top_k": settings.llm.top_k,
+                            "min_p": settings.llm.min_p,
+                            "presence_penalty": settings.llm.presence_penalty,
                             "max_tokens": 2048,
                             "response_format": {"type": "json_object"},
                         }
@@ -1629,6 +1649,10 @@ Read ALL text visible in the document carefully."""
                             "messages": messages,
                             "stream": False,
                             "temperature": settings.llm.temperature,
+                            "top_p": settings.llm.top_p,
+                            "top_k": settings.llm.top_k,
+                            "min_p": settings.llm.min_p,
+                            "presence_penalty": settings.llm.presence_penalty,
                             "max_tokens": 512,
                         }
                     )

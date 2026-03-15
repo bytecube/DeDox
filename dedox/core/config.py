@@ -188,7 +188,11 @@ class LLMSettings(BaseModel):
     model: str = "qwen3-vl:8b"
     # Increased timeout to handle initial model loading and complex extractions
     timeout_seconds: int = 600
-    temperature: float = 0.1
+    temperature: float = 1.0
+    top_p: float = 0.95
+    top_k: int = 20
+    min_p: float = 0.0
+    presence_penalty: float = 1.5
     max_retries: int = 3
     # Context window size (num_ctx for Ollama, n_ctx for llama.cpp)
     context_window: int = 32768
