@@ -464,9 +464,13 @@ async def _create_default_admin(db: Database) -> None:
     admin_password = os.environ.get("DEDOX_ADMIN_PASSWORD")
     admin_email = os.environ.get("DEDOX_ADMIN_EMAIL", "admin@example.com")
 
+    logger.info(f"Admin setup: DEDOX_ADMIN_PASSWORD={'set' if admin_password else 'not set'}, "
+                f"DEDOX_ADMIN_EMAIL={admin_email}")
+
     # Check if admin user already exists
     existing_admin = await repo.get_by_username("admin")
     if existing_admin:
+        logger.info(f"Admin user exists: username={existing_admin.username}, email={existing_admin.email}")
         # Sync password and email from env vars if DEDOX_ADMIN_PASSWORD is set
         if admin_password:
             hashed = repo._hash_password(admin_password)
@@ -474,7 +478,9 @@ async def _create_default_admin(db: Database) -> None:
                 "UPDATE users SET hashed_password = ?, email = ?, updated_at = ? WHERE username = ?",
                 (hashed, admin_email, datetime.now(timezone.utc).isoformat(), "admin"),
             )
-            logger.info("Admin user password and email synced from environment variables")
+            logger.info(f"Admin user password and email synced from environment variables (email={admin_email})")
+        else:
+            logger.warning("DEDOX_ADMIN_PASSWORD not set - admin password unchanged")
         return
 
     # No admin exists - create one

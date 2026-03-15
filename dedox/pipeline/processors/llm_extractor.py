@@ -1263,19 +1263,28 @@ Read ALL text visible in the document carefully."""
         """Call OpenAI-compatible Chat API with structured JSON output.
 
         Compatible with llama.cpp server, vLLM, and other OpenAI API-compatible servers.
-        Uses response_format with embedded json_schema for grammar-constrained generation.
+        Includes the JSON schema in the prompt for instruction-following,
+        and uses response_format json_object for basic JSON constraint.
         """
-        schema_size = len(json.dumps(json_schema))
+        # Build schema description for the prompt
+        schema_json = json.dumps(json_schema, indent=2)
+        schema_size = len(schema_json)
         prompt_size = len(user_prompt)
+
+        # Include schema in user prompt so model knows exact output format
+        enhanced_prompt = (
+            f"{user_prompt}\n\n"
+            f"Respond with a JSON object matching this schema:\n"
+            f"```json\n{schema_json}\n```\n\n"
+            f"Output ONLY the JSON object, no explanations."
+        )
+
         system_prompt = EXTRACTION_SYSTEM_PROMPT
-        # Disable thinking for Qwen3 models to avoid <think> tags in output
-        if settings.llm.disable_thinking:
-            system_prompt = "/no_think\n\n" + system_prompt
 
         logger.info(
             f"OpenAI-compat chat request: model={settings.llm.model}, "
             f"system_prompt={len(system_prompt)} chars, "
-            f"user_prompt={prompt_size} chars, "
+            f"user_prompt={len(enhanced_prompt)} chars, "
             f"schema={schema_size} chars, "
             f"timeout={settings.llm.timeout_seconds}s"
         )
@@ -1295,19 +1304,11 @@ Read ALL text visible in the document carefully."""
                             "model": settings.llm.model,
                             "messages": [
                                 {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_prompt}
+                                {"role": "user", "content": enhanced_prompt}
                             ],
                             "stream": False,
                             "temperature": settings.llm.temperature,
-                            # Embed schema in response_format for llama.cpp grammar constraint
-                            "response_format": {
-                                "type": "json_schema",
-                                "json_schema": {
-                                    "name": "metadata_extraction",
-                                    "strict": True,
-                                    "schema": json_schema,
-                                },
-                            },
+                            "response_format": {"type": "json_object"},
                         }
                     )
 
@@ -1317,13 +1318,19 @@ Read ALL text visible in the document carefully."""
                         )
 
                     result = response.json()
+
+                    # Log raw content before think-tag stripping for debugging
+                    raw_content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    if "<think>" in raw_content:
+                        logger.info(f"Raw response contains <think> block ({len(raw_content)} chars total)")
+
                     response_text = self._openai_parse_response(result)
 
-                    logger.info(f"Raw LLM response: {response_text}")
+                    logger.info(f"Raw LLM response ({len(response_text)} chars): {response_text[:500]}")
 
                     try:
                         parsed = json.loads(response_text)
-                        logger.info(f"Parsed LLM response: {parsed}")
+                        logger.info(f"Parsed LLM response: {len(parsed)} fields")
                         return parsed
                     except json.JSONDecodeError as e:
                         logger.warning(f"Failed to parse JSON response: {e}")
@@ -1366,8 +1373,17 @@ Read ALL text visible in the document carefully."""
         system_prompt = VL_EXTRACTION_SYSTEM_PROMPT if settings.llm.disable_thinking else VL_EXTRACTION_SYSTEM_PROMPT.replace("/no_think\n\n", "")
         headers = self._openai_headers(settings)
 
+        # Include schema in prompt for instruction-following
+        schema_json = json.dumps(json_schema, indent=2)
+        enhanced_prompt = (
+            f"{user_prompt}\n\n"
+            f"Respond with a JSON object matching this schema:\n"
+            f"```json\n{schema_json}\n```\n\n"
+            f"Output ONLY the JSON object, no explanations."
+        )
+
         # Build content array with text + images
-        content = [{"type": "text", "text": user_prompt}]
+        content = [{"type": "text", "text": enhanced_prompt}]
         for img_b64 in images_base64:
             content.append({
                 "type": "image_url",
@@ -1391,14 +1407,7 @@ Read ALL text visible in the document carefully."""
                             ],
                             "stream": False,
                             "temperature": settings.llm.temperature,
-                            "response_format": {
-                                "type": "json_schema",
-                                "json_schema": {
-                                    "name": "metadata_extraction",
-                                    "strict": True,
-                                    "schema": json_schema,
-                                },
-                            },
+                            "response_format": {"type": "json_object"},
                         }
                     )
 
