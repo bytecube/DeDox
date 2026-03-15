@@ -178,11 +178,12 @@ openwebui:
   auto_create_knowledge_base: true
   # Timeout for API requests (increased for synchronous processing)
   timeout_seconds: 300
-  # Wait for file processing before adding to knowledge base (disabled - using synchronous processing)
+  # Poll the /files/{id}/process/status endpoint after the initial sleep until
+  # extraction completes. Disable to rely solely on the fixed file_processing_wait sleep.
   wait_for_processing: false
-  # Max wait time for file processing (seconds)
+  # Max seconds to spend polling when wait_for_processing is true
   max_processing_wait: 300
   # Polling interval for status checks (seconds)
   poll_interval: "${OPENWEBUI_POLL_INTERVAL:5}"
-  # Wait time for file processing (seconds)
+  # Minimum fixed wait (seconds) after upload before polling or adding to KB
   file_processing_wait: 10

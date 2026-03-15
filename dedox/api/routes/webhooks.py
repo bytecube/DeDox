@@ -912,11 +912,7 @@ async def _sync_to_openwebui(paperless_id: int, payload: PaperlessWebhookPayload
 
         # Sync to Open WebUI
         sync_service = OpenWebUISyncService()
-        success = await sync_service.sync_document(
-            dedox_doc,
-            file_path,
-            paperless_doc_data
-        )
+        success = await sync_service.sync_document(dedox_doc, file_path)
 
         if success:
             logger.info(f"Successfully synced document {paperless_id} to Open WebUI")

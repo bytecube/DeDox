@@ -18,6 +18,10 @@ from dedox.models.document import Document
 
 logger = logging.getLogger(__name__)
 
+# Ensure TIFF variants are registered — minimal Docker images may omit them
+mimetypes.add_type("image/tiff", ".tiff")
+mimetypes.add_type("image/tiff", ".tif")
+
 # Lock to prevent concurrent knowledge base creation
 _kb_creation_lock = asyncio.Lock()
 
@@ -609,20 +613,17 @@ class OpenWebUISyncService:
             logger.exception(f"Error adding file to knowledge base: {e}")
             return False
 
-    async def sync_document(
-        self, doc: Document, file_path: Path, paperless_metadata: dict[str, Any]
-    ) -> bool:
+    async def sync_document(self, doc: Document, file_path: Path) -> bool:
         """Sync a document to Open WebUI.
 
         This is the main entry point that orchestrates the full sync process:
-        1. Upload document file
-        2. Wait for processing
+        1. Upload document binary
+        2. Wait for processing (fixed sleep + optional status polling)
         3. Add to knowledge base
 
         Args:
             doc: Document model
-            file_path: Path to document file
-            paperless_metadata: Metadata from Paperless API
+            file_path: Path to document file on disk
 
         Returns:
             True if successful, False otherwise
@@ -642,10 +643,14 @@ class OpenWebUISyncService:
             if not file_id:
                 return False
 
-            # Give Open WebUI time to extract text and build embeddings asynchronously
+            # Minimum fixed wait for Open WebUI to begin text extraction
             wait_time = self.settings.openwebui.file_processing_wait
-            logger.info(f"Waiting {wait_time}s for Open WebUI to process file {file_id}...")
+            logger.info(f"Waiting {wait_time}s for Open WebUI to begin processing file {file_id}...")
             await asyncio.sleep(wait_time)
+
+            # Optional status polling: when wait_for_processing=true, poll until
+            # extraction completes rather than relying solely on the fixed sleep
+            await self.wait_for_processing(file_id)
 
             # Add to knowledge base
             added = await self.add_to_knowledge_base(file_id)
