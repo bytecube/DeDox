@@ -190,10 +190,10 @@ class LLMSettings(BaseModel):
     timeout_seconds: int = 600
     temperature: float = 0.1
     max_retries: int = 3
-    # Context window size (num_ctx for Ollama)
-    context_window: int = 16384
+    # Context window size (num_ctx for Ollama, n_ctx for llama.cpp)
+    context_window: int = 32768
     # Max characters of OCR text to send to LLM
-    ocr_text_limit: int = 8000
+    ocr_text_limit: int = 16000
 
     # Vision-Language model settings
     vision_enabled: bool = True
