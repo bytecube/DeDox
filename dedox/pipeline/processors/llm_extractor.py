@@ -1238,10 +1238,98 @@ Read ALL text visible in the document carefully."""
             headers["Authorization"] = f"Bearer {settings.llm.api_key}"
         return headers
 
+    # Cached server context size (class-level, persists across calls)
+    _server_ctx_size: int | None = None
+
+    async def _detect_server_context_size(self, settings) -> int | None:
+        """Query llama.cpp server for its actual context size via /props endpoint.
+
+        Result is cached at class level to avoid repeated requests.
+        """
+        if LLMExtractor._server_ctx_size is not None:
+            return LLMExtractor._server_ctx_size
+
+        if settings.llm.provider != "openai-compat":
+            return None
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.get(f"{settings.llm.base_url}/props")
+                if response.status_code == 200:
+                    props = response.json()
+                    n_ctx = props.get("default_generation_settings", {}).get("n_ctx")
+                    if n_ctx:
+                        LLMExtractor._server_ctx_size = n_ctx
+                        logger.info(f"Detected LLM server context size: {n_ctx} tokens")
+                        if n_ctx < settings.llm.context_window:
+                            logger.warning(
+                                f"LLM server context size ({n_ctx}) is smaller than configured "
+                                f"context_window ({settings.llm.context_window}). "
+                                f"Consider restarting llama.cpp with: --ctx-size {settings.llm.context_window}"
+                            )
+                        return n_ctx
+        except Exception as e:
+            logger.debug(f"Could not detect server context size via /props: {e}")
+        return None
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Rough token count estimate (~3.5 chars per token for multilingual)."""
+        return len(text) // 3
+
+    def _truncate_prompt_for_context(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_ctx: int,
+        reserve_output: int = 2048,
+    ) -> str:
+        """Truncate user prompt to fit within the server's context window.
+
+        Preserves the end of the prompt (which contains the JSON schema and
+        instructions) and truncates the OCR text in the middle.
+        """
+        total_tokens = self._estimate_tokens(system_prompt + user_prompt)
+        available = max_ctx - reserve_output
+
+        if total_tokens <= available:
+            return user_prompt
+
+        system_tokens = self._estimate_tokens(system_prompt)
+        user_budget_tokens = available - system_tokens
+        user_budget_chars = max(user_budget_tokens * 3, 500)
+
+        if len(user_prompt) <= user_budget_chars:
+            return user_prompt
+
+        # Find the OCR text boundary (between --- markers) and truncate there
+        # to preserve the schema/instructions at the end
+        schema_marker = "\n\nRespond with a JSON object"
+        marker_pos = user_prompt.find(schema_marker)
+
+        if marker_pos > 0:
+            # Keep the schema instructions intact, truncate the OCR text part
+            suffix = user_prompt[marker_pos:]
+            suffix_budget = len(suffix) + 100  # small margin
+            ocr_budget = user_budget_chars - suffix_budget
+            if ocr_budget > 200:
+                truncated = user_prompt[:ocr_budget] + "\n[... truncated to fit context ...]\n" + suffix
+            else:
+                truncated = user_prompt[:user_budget_chars]
+        else:
+            truncated = user_prompt[:user_budget_chars]
+
+        logger.warning(
+            f"Truncated prompt from {len(user_prompt)} to {len(truncated)} chars "
+            f"to fit server context window ({max_ctx} tokens, {reserve_output} reserved for output). "
+            f"Increase llama.cpp --ctx-size for better quality."
+        )
+        return truncated
+
     def _openai_parse_response(self, result: dict) -> str:
         """Extract content from OpenAI-compatible chat completion response.
 
-        Handles Qwen3 thinking mode by stripping <think>...</think> blocks.
+        Handles Qwen3 thinking mode by stripping <think>...</think> blocks,
+        and strips markdown code fences wrapping JSON.
         """
         choices = result.get("choices", [])
         if not choices:
@@ -1251,6 +1339,12 @@ Read ALL text visible in the document carefully."""
         # Strip Qwen3 thinking tags if present
         if "<think>" in content:
             content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
+        # Strip markdown code fences (```json ... ``` or ``` ... ```)
+        if content.startswith("```"):
+            content = re.sub(r"^```(?:json)?\s*\n?", "", content)
+            content = re.sub(r"\n?```\s*$", "", content)
+            content = content.strip()
 
         return content
 
@@ -1265,11 +1359,13 @@ Read ALL text visible in the document carefully."""
         Compatible with llama.cpp server, vLLM, and other OpenAI API-compatible servers.
         Includes the JSON schema in the prompt for instruction-following,
         and uses response_format json_object for basic JSON constraint.
+
+        Automatically detects the server's context window and truncates
+        prompts to fit, reserving space for output generation.
         """
         # Build schema description for the prompt
         schema_json = json.dumps(json_schema, indent=2)
         schema_size = len(schema_json)
-        prompt_size = len(user_prompt)
 
         # Include schema in user prompt so model knows exact output format
         enhanced_prompt = (
@@ -1281,11 +1377,19 @@ Read ALL text visible in the document carefully."""
 
         system_prompt = EXTRACTION_SYSTEM_PROMPT
 
+        # Detect server context and truncate prompt if needed
+        server_ctx = await self._detect_server_context_size(settings)
+        effective_ctx = server_ctx or settings.llm.context_window
+        enhanced_prompt = self._truncate_prompt_for_context(
+            system_prompt, enhanced_prompt, effective_ctx
+        )
+
         logger.info(
             f"OpenAI-compat chat request: model={settings.llm.model}, "
             f"system_prompt={len(system_prompt)} chars, "
             f"user_prompt={len(enhanced_prompt)} chars, "
             f"schema={schema_size} chars, "
+            f"server_ctx={effective_ctx}, "
             f"timeout={settings.llm.timeout_seconds}s"
         )
 
@@ -1308,9 +1412,31 @@ Read ALL text visible in the document carefully."""
                             ],
                             "stream": False,
                             "temperature": settings.llm.temperature,
+                            "max_tokens": 2048,
                             "response_format": {"type": "json_object"},
                         }
                     )
+
+                    # Handle context exceeded error with truncation retry
+                    if response.status_code == 400:
+                        error_data = response.json() if response.text else {}
+                        error_msg = error_data.get("error", {}).get("message", "")
+                        if "exceed" in error_msg and "context" in error_msg:
+                            ctx_match = re.search(r'context size \((\d+)', error_msg)
+                            actual_ctx = int(ctx_match.group(1)) if ctx_match else 4096
+                            LLMExtractor._server_ctx_size = actual_ctx
+                            if attempt < settings.llm.max_retries - 1:
+                                logger.warning(
+                                    f"Request exceeds server context ({actual_ctx} tokens). "
+                                    f"Truncating prompt and retrying."
+                                )
+                                enhanced_prompt = self._truncate_prompt_for_context(
+                                    system_prompt, enhanced_prompt, actual_ctx
+                                )
+                                continue
+                        raise LLMError(
+                            f"OpenAI-compat API error: {response.status_code} - {response.text}"
+                        )
 
                     if response.status_code != 200:
                         raise LLMError(
@@ -1318,27 +1444,35 @@ Read ALL text visible in the document carefully."""
                         )
 
                     result = response.json()
-
-                    # Log full API response structure for debugging
                     choice = result.get("choices", [{}])[0]
                     finish_reason = choice.get("finish_reason", "unknown")
-                    message = choice.get("message", {})
-                    raw_content = message.get("content", "")
-                    role = message.get("role", "unknown")
-                    # Log all message keys to detect non-standard fields
-                    msg_keys = list(message.keys())
                     usage = result.get("usage", {})
 
                     logger.info(
                         f"LLM API response: finish_reason={finish_reason}, "
-                        f"role={role}, content_len={len(raw_content)}, "
-                        f"message_keys={msg_keys}, "
                         f"usage={usage}"
                     )
-                    if raw_content:
-                        logger.info(f"Raw content first 300 chars: {raw_content[:300]}")
-                    else:
-                        logger.warning(f"Content is empty! Full choice: {json.dumps(choice)[:500]}")
+
+                    # If output was truncated (finish_reason=length), retry with
+                    # a shorter prompt to leave more room for generation
+                    if finish_reason == "length" and attempt < settings.llm.max_retries - 1:
+                        prompt_tokens = usage.get("prompt_tokens", 0)
+                        completion_tokens = usage.get("completion_tokens", 0)
+                        if prompt_tokens > 0:
+                            # Reduce prompt to use at most 50% of context,
+                            # leaving the rest for output
+                            reduced_ctx = effective_ctx
+                            reserve = max(effective_ctx // 2, completion_tokens * 3)
+                            logger.warning(
+                                f"Response truncated (finish_reason=length, "
+                                f"prompt={prompt_tokens}, completion={completion_tokens}). "
+                                f"Reducing prompt and retrying with {reserve} tokens reserved for output."
+                            )
+                            enhanced_prompt = self._truncate_prompt_for_context(
+                                system_prompt, enhanced_prompt, reduced_ctx,
+                                reserve_output=reserve,
+                            )
+                            continue
 
                     response_text = self._openai_parse_response(result)
 
@@ -1398,6 +1532,13 @@ Read ALL text visible in the document carefully."""
             f"Output ONLY the JSON object, no explanations."
         )
 
+        # Truncate text prompt for context (images are tokenized separately)
+        server_ctx = await self._detect_server_context_size(settings)
+        effective_ctx = server_ctx or settings.llm.context_window
+        enhanced_prompt = self._truncate_prompt_for_context(
+            system_prompt, enhanced_prompt, effective_ctx
+        )
+
         # Build content array with text + images
         content = [{"type": "text", "text": enhanced_prompt}]
         for img_b64 in images_base64:
@@ -1423,6 +1564,7 @@ Read ALL text visible in the document carefully."""
                             ],
                             "stream": False,
                             "temperature": settings.llm.temperature,
+                            "max_tokens": 2048,
                             "response_format": {"type": "json_object"},
                         }
                     )
@@ -1487,6 +1629,7 @@ Read ALL text visible in the document carefully."""
                             "messages": messages,
                             "stream": False,
                             "temperature": settings.llm.temperature,
+                            "max_tokens": 512,
                         }
                     )
 
