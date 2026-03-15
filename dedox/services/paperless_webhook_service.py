@@ -523,16 +523,22 @@ class PaperlessWebhookService:
     async def update_document_content(
         self,
         paperless_id: int,
-        content: str
+        content: str,
+        timeout: float = 120.0,
     ) -> bool:
         """Update the document content (OCR text) in Paperless.
 
         This overwrites the built-in OCR result with externally extracted text,
         such as from a Vision-Language model.
 
+        A longer timeout than the default is used because Paperless triggers a
+        full-text re-index after a content update, which can take 30-90 seconds
+        depending on document size and server load.
+
         Args:
             paperless_id: Paperless document ID
             content: The text content to set
+            timeout: Request timeout in seconds (default 120 to cover re-indexing)
 
         Returns:
             True if successful
@@ -541,7 +547,8 @@ class PaperlessWebhookService:
             async with await self._get_client() as client:
                 response = await client.patch(
                     f"/api/documents/{paperless_id}/",
-                    json={"content": content}
+                    json={"content": content},
+                    timeout=timeout,
                 )
 
                 if response.status_code != 200:
@@ -558,7 +565,10 @@ class PaperlessWebhookService:
             return True
 
         except Exception as e:
-            logger.error(f"Error updating content for document {paperless_id}: {e}")
+            # Use repr() as fallback — some httpx exceptions (e.g. ReadTimeout)
+            # have an empty str() but always have a non-empty repr()
+            detail = str(e) or repr(e)
+            logger.error(f"Error updating content for document {paperless_id}: {detail}")
             return False
 
     async def finalize_document_processing(
