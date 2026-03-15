@@ -29,6 +29,7 @@ import os
 import re
 import secrets
 import string
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -447,32 +448,41 @@ def _generate_secure_password(length: int = 16) -> str:
 
 
 async def _create_default_admin(db: Database) -> None:
-    """Create default admin user if no users exist.
+    """Create or update default admin user.
 
     Password is either taken from DEDOX_ADMIN_PASSWORD environment variable
     or generated randomly and printed to logs (only on first run).
+
+    If the admin user already exists and DEDOX_ADMIN_PASSWORD is set,
+    the password and email are synced from the environment variables.
     """
     from dedox.db.repositories.user_repository import UserRepository
     from dedox.models.user import UserCreate, UserRole
 
     repo = UserRepository(db)
 
-    # Check if any users exist
-    result = await db.fetch_one("SELECT COUNT(*) as count FROM users")
-    if result and result["count"] > 0:
+    admin_password = os.environ.get("DEDOX_ADMIN_PASSWORD")
+    admin_email = os.environ.get("DEDOX_ADMIN_EMAIL", "admin@example.com")
+
+    # Check if admin user already exists
+    existing_admin = await repo.get_by_username("admin")
+    if existing_admin:
+        # Sync password and email from env vars if DEDOX_ADMIN_PASSWORD is set
+        if admin_password:
+            hashed = repo._hash_password(admin_password)
+            await db.execute(
+                "UPDATE users SET hashed_password = ?, email = ?, updated_at = ? WHERE username = ?",
+                (hashed, admin_email, datetime.now(timezone.utc).isoformat(), "admin"),
+            )
+            logger.info("Admin user password and email synced from environment variables")
         return
 
-    # Get password from environment or generate a secure one
-    admin_password = os.environ.get("DEDOX_ADMIN_PASSWORD")
+    # No admin exists - create one
     password_was_generated = False
-
     if not admin_password:
         admin_password = _generate_secure_password()
         password_was_generated = True
 
-    admin_email = os.environ.get("DEDOX_ADMIN_EMAIL", "admin@example.com")
-
-    # Create default admin
     logger.info("Creating default admin user...")
     user_create = UserCreate(
         username="admin",

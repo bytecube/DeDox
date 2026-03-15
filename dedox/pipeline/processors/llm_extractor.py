@@ -1239,11 +1239,20 @@ Read ALL text visible in the document carefully."""
         return headers
 
     def _openai_parse_response(self, result: dict) -> str:
-        """Extract content from OpenAI-compatible chat completion response."""
+        """Extract content from OpenAI-compatible chat completion response.
+
+        Handles Qwen3 thinking mode by stripping <think>...</think> blocks.
+        """
         choices = result.get("choices", [])
         if not choices:
             raise LLMError("Empty choices in OpenAI-compatible response")
-        return choices[0].get("message", {}).get("content", "").strip()
+        content = choices[0].get("message", {}).get("content", "").strip()
+
+        # Strip Qwen3 thinking tags if present
+        if "<think>" in content:
+            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
+        return content
 
     async def _call_openai_chat(
         self,
@@ -1254,14 +1263,18 @@ Read ALL text visible in the document carefully."""
         """Call OpenAI-compatible Chat API with structured JSON output.
 
         Compatible with llama.cpp server, vLLM, and other OpenAI API-compatible servers.
+        Uses response_format with embedded json_schema for grammar-constrained generation.
         """
         schema_size = len(json.dumps(json_schema))
         prompt_size = len(user_prompt)
-        system_prompt_size = len(EXTRACTION_SYSTEM_PROMPT)
+        system_prompt = EXTRACTION_SYSTEM_PROMPT
+        # Disable thinking for Qwen3 models to avoid <think> tags in output
+        if settings.llm.disable_thinking:
+            system_prompt = "/no_think\n\n" + system_prompt
 
         logger.info(
             f"OpenAI-compat chat request: model={settings.llm.model}, "
-            f"system_prompt={system_prompt_size} chars, "
+            f"system_prompt={len(system_prompt)} chars, "
             f"user_prompt={prompt_size} chars, "
             f"schema={schema_size} chars, "
             f"timeout={settings.llm.timeout_seconds}s"
@@ -1281,14 +1294,20 @@ Read ALL text visible in the document carefully."""
                         json={
                             "model": settings.llm.model,
                             "messages": [
-                                {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+                                {"role": "system", "content": system_prompt},
                                 {"role": "user", "content": user_prompt}
                             ],
                             "stream": False,
                             "temperature": settings.llm.temperature,
-                            # json_object mode + top-level schema for llama.cpp grammar constraint
-                            "response_format": {"type": "json_object"},
-                            "json_schema": json_schema,
+                            # Embed schema in response_format for llama.cpp grammar constraint
+                            "response_format": {
+                                "type": "json_schema",
+                                "json_schema": {
+                                    "name": "metadata_extraction",
+                                    "strict": True,
+                                    "schema": json_schema,
+                                },
+                            },
                         }
                     )
 
@@ -1372,9 +1391,14 @@ Read ALL text visible in the document carefully."""
                             ],
                             "stream": False,
                             "temperature": settings.llm.temperature,
-                            # json_object mode + top-level schema for llama.cpp grammar constraint
-                            "response_format": {"type": "json_object"},
-                            "json_schema": json_schema,
+                            "response_format": {
+                                "type": "json_schema",
+                                "json_schema": {
+                                    "name": "metadata_extraction",
+                                    "strict": True,
+                                    "schema": json_schema,
+                                },
+                            },
                         }
                     )
 
@@ -1415,9 +1439,15 @@ Read ALL text visible in the document carefully."""
         """Call OpenAI-compatible API for simple text generation.
 
         Wraps the prompt as a chat completion since OpenAI API has no /generate endpoint.
-        Used by SenderMatcher for correspondent matching.
+        Used by SenderMatcher for correspondent matching and per-field extraction.
         """
         headers = self._openai_headers(settings)
+
+        messages = []
+        # Add /no_think system message for Qwen3 thinking models
+        if settings.llm.disable_thinking:
+            messages.append({"role": "system", "content": "/no_think"})
+        messages.append({"role": "user", "content": prompt})
 
         async with httpx.AsyncClient(
             timeout=settings.llm.timeout_seconds
@@ -1429,9 +1459,7 @@ Read ALL text visible in the document carefully."""
                         headers=headers,
                         json={
                             "model": settings.llm.model,
-                            "messages": [
-                                {"role": "user", "content": prompt}
-                            ],
+                            "messages": messages,
                             "stream": False,
                             "temperature": settings.llm.temperature,
                         }
