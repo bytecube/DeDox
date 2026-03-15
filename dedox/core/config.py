@@ -176,22 +176,32 @@ class ImageProcessingSettings(BaseModel):
 
 
 class LLMSettings(BaseModel):
-    """LLM provider configuration."""
+    """LLM provider configuration.
+
+    Supported providers:
+    - "ollama": Ollama API (/api/chat, /api/generate)
+    - "openai-compat": OpenAI-compatible API (/v1/chat/completions), e.g. llama.cpp
+    """
     provider: str = "ollama"
     base_url: str = "http://ollama:11434"
+    api_key: str = ""
     model: str = "qwen3-vl:8b"
     # Increased timeout to handle initial model loading and complex extractions
     timeout_seconds: int = 600
-    temperature: float = 0.1
+    temperature: float = 1.0
+    top_p: float = 0.95
+    top_k: int = 20
+    min_p: float = 0.0
+    presence_penalty: float = 1.5
     max_retries: int = 3
-    # Context window size (num_ctx for Ollama)
-    context_window: int = 16384
+    # Context window size (num_ctx for Ollama, n_ctx for llama.cpp)
+    context_window: int = 32768
     # Max characters of OCR text to send to LLM
-    ocr_text_limit: int = 8000
+    ocr_text_limit: int = 16000
 
     # Vision-Language model settings
     vision_enabled: bool = True
-    vision_model_patterns: list[str] = ["*-vl*", "*vl:*", "*vision*", "*llava*", "*minicpm-v*"]
+    vision_model_patterns: list[str] = ["*-vl*", "*vl:*", "*vision*", "*llava*", "*minicpm-v*", "*qwen3*"]
     max_image_size_pixels: int = 1568
     image_quality: int = 85
     disable_thinking: bool = True

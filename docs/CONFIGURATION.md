@@ -138,14 +138,35 @@ ocr:
 
 ### LLM Settings
 
+DeDox supports two LLM providers:
+- **`ollama`** (default): Uses Ollama's native API (`/api/chat`)
+- **`openai-compat`**: Uses OpenAI-compatible API (`/v1/chat/completions`) for llama.cpp, vLLM, text-generation-webui, etc.
+
 ```yaml
 llm:
-  ollama_url: "http://ollama:11434"  # Ollama API URL
-  model: "qwen2.5:14b"      # Model name
-  timeout_seconds: 120      # Request timeout
-  max_retries: 3            # Retry count on failure
-  temperature: 0.1          # Model temperature (lower = more deterministic)
+  provider: "ollama"                  # "ollama" or "openai-compat"
+  base_url: "http://ollama:11434"     # LLM server URL
+  api_key: ""                         # API key (for authenticated endpoints)
+  model: "qwen2.5:14b"               # Model name
+  timeout_seconds: 600                # Request timeout
+  max_retries: 3                      # Retry count on failure
+  temperature: 0.1                    # Model temperature (lower = more deterministic)
+  context_window: 32768               # Context window size (num_ctx for Ollama)
+  ocr_text_limit: 16000              # Max chars of OCR text to send to LLM
+  disable_thinking: true              # Disable Qwen3 thinking mode (/no_think)
+
+  # Vision-Language model support
+  vision_enabled: true
+  vision_model_patterns:              # Glob patterns to detect VL models
+    - "*-vl*"
+    - "*vl:*"
+    - "*vision*"
+    - "*llava*"
+    - "*minicpm-v*"
+    - "*qwen3*"
 ```
+
+> **llama.cpp users**: Ensure your server is started with `--ctx-size 32768` (or at least 8192). The default of 4096 is too small for document extraction prompts.
 
 ### Paperless-ngx Settings
 
@@ -339,6 +360,10 @@ rules:
 
 ## Docker Configuration
 
+### Proxmox LXC Deployment (deploy/proxmox/)
+
+For Proxmox users with an existing llama.cpp server. See [`deploy/proxmox/README.md`](../deploy/proxmox/README.md).
+
 ### Full Stack (docker-compose.yml)
 
 Includes DeDox, Paperless-ngx, Ollama, Open WebUI, PostgreSQL, and Redis.
@@ -409,7 +434,7 @@ llm:
   model: "qwen2.5:7b"  # Smaller model for faster dev
 ```
 
-### Production
+### Production with Ollama
 
 ```yaml
 server:
@@ -421,6 +446,30 @@ server:
 auth:
   allow_registration: false
   token_expire_hours: 8
+
+llm:
+  provider: "ollama"
+  base_url: "http://ollama:11434"
+  model: "qwen2.5:14b"
+  context_window: 32768
+
+paperless:
+  webhook:
+    secret: "your-secure-webhook-secret"
+```
+
+### Production with llama.cpp
+
+```yaml
+server:
+  debug: false
+
+llm:
+  provider: "openai-compat"
+  base_url: "http://192.168.1.50:8080"
+  model: "qwen3.5-35b-a3b-q4.gguf"
+  context_window: 32768
+  disable_thinking: true
 
 paperless:
   webhook:

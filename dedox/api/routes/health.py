@@ -66,21 +66,38 @@ async def detailed_health_check() -> dict[str, Any]:
         status["services"]["paperless"] = {"status": "unhealthy", "error": str(e)}
         status["status"] = "degraded"
     
-    # Check Ollama
+    # Check LLM provider
     try:
         import httpx
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"{settings.llm.ollama_url}/api/tags")
-            if response.status_code == 200:
-                status["services"]["ollama"] = {"status": "healthy"}
+            if settings.llm.provider == "openai-compat":
+                headers = {}
+                if settings.llm.api_key:
+                    headers["Authorization"] = f"Bearer {settings.llm.api_key}"
+                response = await client.get(
+                    f"{settings.llm.base_url}/v1/models",
+                    headers=headers,
+                )
             else:
-                status["services"]["ollama"] = {
+                response = await client.get(f"{settings.llm.ollama_url}/api/tags")
+            if response.status_code == 200:
+                status["services"]["llm"] = {
+                    "status": "healthy",
+                    "provider": settings.llm.provider,
+                }
+            else:
+                status["services"]["llm"] = {
                     "status": "unhealthy",
+                    "provider": settings.llm.provider,
                     "error": f"HTTP {response.status_code}",
                 }
                 status["status"] = "degraded"
     except Exception as e:
-        status["services"]["ollama"] = {"status": "unhealthy", "error": str(e)}
+        status["services"]["llm"] = {
+            "status": "unhealthy",
+            "provider": settings.llm.provider,
+            "error": str(e),
+        }
         status["status"] = "degraded"
     
     return status

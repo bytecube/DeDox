@@ -4,10 +4,11 @@ This document describes the AI/LLM components used in DeDox for intelligent docu
 
 ## Overview
 
-DeDox uses local LLM models via Ollama to extract structured metadata from OCR text. This ensures:
+DeDox uses local LLM models via **Ollama** or **llama.cpp** (OpenAI-compatible API) to extract structured metadata from OCR text. This ensures:
 - Complete privacy (no data leaves your network)
 - Offline operation capability
 - Customizable extraction via prompt engineering
+- Flexibility to use different LLM serving infrastructure
 
 ## LLM Extractor
 
@@ -21,13 +22,23 @@ The extractor uses a two-phase approach:
 
 1. **Structured Batch Extraction** (Primary)
    - Sends all configured fields to the LLM in a single request
-   - Uses JSON mode for structured output
+   - Uses JSON schema constraints (Ollama `format` parameter or OpenAI `response_format`)
    - More efficient for most documents
 
 2. **Individual Field Extraction** (Fallback)
    - Falls back to extracting fields one-by-one if batch fails
    - More robust for complex or unusual documents
    - Slower but handles edge cases better
+
+### Provider Differences
+
+| Feature | Ollama | OpenAI-compatible (llama.cpp) |
+|---------|--------|-------------------------------|
+| API endpoint | `/api/chat` | `/v1/chat/completions` |
+| JSON constraint | `format` parameter with schema | `response_format: json_object` |
+| Context size | `num_ctx` per request | Set at server startup (`--ctx-size`) |
+| Vision support | Native multimodal | Base64 image URLs in content array |
+| Thinking models | `/no_think` in system prompt | `/no_think` + `<think>` block stripping |
 
 ### Configurable Fields
 
@@ -141,28 +152,48 @@ rules:
 
 ## Model Configuration
 
-### Default Model
+### Ollama (Default)
 
 ```yaml
 llm:
-  ollama_url: "http://ollama:11434"
+  provider: "ollama"
+  base_url: "http://ollama:11434"
   model: "qwen2.5:14b"
-  timeout_seconds: 120
-  temperature: 0.1  # Low temperature for consistent extraction
+  timeout_seconds: 600
+  temperature: 0.1
+  context_window: 32768
 ```
+
+### llama.cpp (OpenAI-compatible)
+
+```yaml
+llm:
+  provider: "openai-compat"
+  base_url: "http://192.168.1.50:8080"
+  model: "qwen3.5-35b-a3b-q4.gguf"
+  timeout_seconds: 600
+  temperature: 0.1
+  context_window: 32768
+  disable_thinking: true
+```
+
+> **Important**: Start your llama.cpp server with `--ctx-size 32768` to match. The default of 4096 will cause "exceed context size" errors.
 
 ### Recommended Models
 
-| Model | Size | Use Case |
-|-------|------|----------|
-| qwen2.5:14b | 14B | Best accuracy (default) |
-| qwen2.5:7b | 7B | Faster, lower memory |
-| llama3.2:3b | 3B | Minimal resources |
+| Model | Provider | Size | Use Case |
+|-------|----------|------|----------|
+| qwen2.5:14b | Ollama | 14B | Best accuracy (Ollama default) |
+| qwen3-vl:8b | Ollama | 8B | Vision-Language model with image support |
+| qwen2.5:7b | Ollama | 7B | Faster, lower memory |
+| qwen3.5-35b-a3b (Q4) | llama.cpp | 35B (3B active) | MoE model, fast with good accuracy |
+| llama3.2:3b | Ollama | 3B | Minimal resources |
 
 ### Hardware Requirements
 
 - **Minimum**: 8GB RAM (for 7B models)
 - **Recommended**: 16GB+ RAM (for 14B models)
+- **llama.cpp MoE models**: 24GB+ VRAM for Q4 quantized 35B models
 - **GPU**: Optional but significantly improves speed
 
 ## Prompt Engineering Tips

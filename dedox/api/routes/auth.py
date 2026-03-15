@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Response
 from pydantic import BaseModel, EmailStr
 
 from dedox.api.deps import (
@@ -60,13 +60,13 @@ class APIKeyResponse(BaseModel):
 
 
 @router.post("/login", response_model=LoginResponse, dependencies=[Depends(check_login_rate_limit)])
-async def login(request: LoginRequest, response: Response):
+async def login(login_data: LoginRequest, request: Request, response: Response):
     """Authenticate and get an access token."""
     db = await get_database()
     repo = UserRepository(db)
-    
+
     # Verify credentials
-    user = await repo.verify_password(request.username, request.password)
+    user = await repo.verify_password(login_data.username, login_data.password)
     
     if not user:
         raise HTTPException(
@@ -85,14 +85,15 @@ async def login(request: LoginRequest, response: Response):
     token = create_access_token(str(user.id), user.role)
     
     # Set cookie for web UI
-    # Use secure=True in production (when not in debug mode)
+    # Only set secure=True if the request arrived over HTTPS
+    is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
     response.set_cookie(
         key="access_token",
         value=token,
         httponly=True,
         max_age=settings.auth.token_expire_hours * 3600,
         samesite="lax",
-        secure=not settings.server.debug,  # Secure in production
+        secure=is_https,
     )
     
     return LoginResponse(

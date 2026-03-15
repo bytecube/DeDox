@@ -69,17 +69,24 @@ image_processing:
   hough_max_line_gap: 10
 
 llm:
-  provider: "ollama"
+  # Provider: "ollama" (default) or "openai-compat" (for llama.cpp, vLLM, etc.)
+  provider: "${DEDOX_LLM_PROVIDER:ollama}"
   base_url: "${DEDOX_OLLAMA_URL:http://ollama:11434}"
+  # API key for authenticated endpoints (openai-compat provider)
+  api_key: "${DEDOX_LLM_API_KEY:}"
   model: "${OLLAMA_MODEL:qwen3-vl:8b}"
   # Increased timeout to handle initial model loading and schema-constrained generation
   timeout_seconds: 600
-  temperature: 0.1
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 20
+  min_p: 0.0
+  presence_penalty: 1.5
   max_retries: 3
-  # Context window size (num_ctx for Ollama)
-  context_window: "${OLLAMA_CONTEXT_WINDOW:16384}"
+  # Context window size (num_ctx for Ollama, --ctx-size for llama.cpp)
+  context_window: "${OLLAMA_CONTEXT_WINDOW:32768}"
   # Max characters of OCR text to send to LLM
-  ocr_text_limit: "${OLLAMA_OCR_TEXT_LIMIT:8000}"
+  ocr_text_limit: "${OLLAMA_OCR_TEXT_LIMIT:16000}"
 
   # Vision-Language model settings
   vision_enabled: true
@@ -154,8 +161,8 @@ database:
 openwebui:
   # Enable/disable Open WebUI sync
   enabled: true
-  # Base URL for Open WebUI API (internal container address)
-  base_url: "http://open-webui:8080"
+  # Base URL for Open WebUI API (internal container address or external URL)
+  base_url: "${DEDOX_OPENWEBUI_URL:http://open-webui:8080}"
   # Frontend port for external access
   frontend_port: 3000
   # API authentication - leave empty to auto-generate using admin credentials

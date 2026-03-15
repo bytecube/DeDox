@@ -449,8 +449,14 @@ class LLMExtractor(BaseProcessor):
     def sender_matcher(self) -> SenderMatcher:
         """Lazy initialization of sender matcher."""
         if self._sender_matcher is None:
-            self._sender_matcher = SenderMatcher(self._call_ollama)
+            self._sender_matcher = SenderMatcher(self._call_llm_generate)
         return self._sender_matcher
+
+    async def _call_llm_generate(self, prompt: str, settings) -> str:
+        """Provider-aware generate call (used by SenderMatcher)."""
+        if settings.llm.provider == "openai-compat":
+            return await self._call_openai_generate(prompt, settings)
+        return await self._call_ollama(prompt, settings)
 
     @property
     def stage(self) -> JobStage:
@@ -597,8 +603,8 @@ class LLMExtractor(BaseProcessor):
             values=", ".join(allowed_values) if allowed_values else "",
         )
         
-        # Call Ollama
-        response = await self._call_ollama(prompt, settings)
+        # Call LLM
+        response = await self._call_llm_generate(prompt, settings)
         
         # Parse response based on type
         value = self._parse_response(response, field_type, allowed_values)
@@ -634,9 +640,12 @@ class LLMExtractor(BaseProcessor):
         prompt = self._build_structured_prompt(fields, ocr_text, settings)
         logger.debug(f"Extraction prompt ({len(prompt)} chars): {prompt[:500]}...")
 
-        # Call Ollama Chat API with schema-constrained output
+        # Call LLM with schema-constrained output
         try:
-            response_json = await self._call_ollama_chat(prompt, json_schema, settings)
+            if settings.llm.provider == "openai-compat":
+                response_json = await self._call_openai_chat(prompt, json_schema, settings)
+            else:
+                response_json = await self._call_ollama_chat(prompt, json_schema, settings)
 
             # Parse and validate the response
             extracted = {}
@@ -739,12 +748,20 @@ Read ALL text visible in ALL pages carefully. Combine text from all pages in rea
 Read ALL text visible in the document carefully."""
 
         # Call VL model with all images
-        response_json = await self._call_ollama_chat_vl(
-            prompt,
-            json_schema,
-            encoded_images,
-            settings
-        )
+        if settings.llm.provider == "openai-compat":
+            response_json = await self._call_openai_chat_vl(
+                prompt,
+                json_schema,
+                encoded_images,
+                settings
+            )
+        else:
+            response_json = await self._call_ollama_chat_vl(
+                prompt,
+                json_schema,
+                encoded_images,
+                settings
+            )
 
         # Extract OCR text
         ocr_text = response_json.get("ocr_text", "")
@@ -862,6 +879,10 @@ Read ALL text visible in the document carefully."""
                             "format": json_schema,
                             "options": {
                                 "temperature": settings.llm.temperature,
+                                "top_p": settings.llm.top_p,
+                                "top_k": settings.llm.top_k,
+                                "min_p": settings.llm.min_p,
+                                "presence_penalty": settings.llm.presence_penalty,
                                 "num_ctx": settings.llm.context_window,
                             }
                         }
@@ -1062,6 +1083,10 @@ Read ALL text visible in the document carefully."""
                             "format": json_schema,  # Schema-constrained output
                             "options": {
                                 "temperature": settings.llm.temperature,
+                                "top_p": settings.llm.top_p,
+                                "top_k": settings.llm.top_k,
+                                "min_p": settings.llm.min_p,
+                                "presence_penalty": settings.llm.presence_penalty,
                                 "num_ctx": settings.llm.context_window,
                             }
                         }
@@ -1186,6 +1211,10 @@ Read ALL text visible in the document carefully."""
                             "stream": False,
                             "options": {
                                 "temperature": settings.llm.temperature,
+                                "top_p": settings.llm.top_p,
+                                "top_k": settings.llm.top_k,
+                                "min_p": settings.llm.min_p,
+                                "presence_penalty": settings.llm.presence_penalty,
                                 "num_ctx": settings.llm.context_window,
                             }
                         }
@@ -1211,7 +1240,444 @@ Read ALL text visible in the document carefully."""
                     )
         
         raise LLMError("Max retries exceeded")
-    
+
+    # --- OpenAI-compatible API methods (for llama.cpp, vLLM, etc.) ---
+
+    def _openai_headers(self, settings) -> dict:
+        """Build headers for OpenAI-compatible API requests."""
+        headers = {"Content-Type": "application/json"}
+        if settings.llm.api_key:
+            headers["Authorization"] = f"Bearer {settings.llm.api_key}"
+        return headers
+
+    # Cached server context size (class-level, persists across calls)
+    _server_ctx_size: int | None = None
+
+    async def _detect_server_context_size(self, settings) -> int | None:
+        """Query llama.cpp server for its actual context size via /props endpoint.
+
+        Result is cached at class level to avoid repeated requests.
+        """
+        if LLMExtractor._server_ctx_size is not None:
+            return LLMExtractor._server_ctx_size
+
+        if settings.llm.provider != "openai-compat":
+            return None
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.get(f"{settings.llm.base_url}/props")
+                if response.status_code == 200:
+                    props = response.json()
+                    n_ctx = props.get("default_generation_settings", {}).get("n_ctx")
+                    if n_ctx:
+                        LLMExtractor._server_ctx_size = n_ctx
+                        logger.info(f"Detected LLM server context size: {n_ctx} tokens")
+                        if n_ctx < settings.llm.context_window:
+                            logger.warning(
+                                f"LLM server context size ({n_ctx}) is smaller than configured "
+                                f"context_window ({settings.llm.context_window}). "
+                                f"Consider restarting llama.cpp with: --ctx-size {settings.llm.context_window}"
+                            )
+                        return n_ctx
+        except Exception as e:
+            logger.debug(f"Could not detect server context size via /props: {e}")
+        return None
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Rough token count estimate (~3.5 chars per token for multilingual)."""
+        return len(text) // 3
+
+    def _truncate_prompt_for_context(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_ctx: int,
+        reserve_output: int = 2048,
+    ) -> str:
+        """Truncate user prompt to fit within the server's context window.
+
+        Preserves the end of the prompt (which contains the JSON schema and
+        instructions) and truncates the OCR text in the middle.
+        """
+        total_tokens = self._estimate_tokens(system_prompt + user_prompt)
+        available = max_ctx - reserve_output
+
+        if total_tokens <= available:
+            return user_prompt
+
+        system_tokens = self._estimate_tokens(system_prompt)
+        user_budget_tokens = available - system_tokens
+        user_budget_chars = max(user_budget_tokens * 3, 500)
+
+        if len(user_prompt) <= user_budget_chars:
+            return user_prompt
+
+        # Find the OCR text boundary (between --- markers) and truncate there
+        # to preserve the schema/instructions at the end
+        schema_marker = "\n\nRespond with a JSON object"
+        marker_pos = user_prompt.find(schema_marker)
+
+        if marker_pos > 0:
+            # Keep the schema instructions intact, truncate the OCR text part
+            suffix = user_prompt[marker_pos:]
+            suffix_budget = len(suffix) + 100  # small margin
+            ocr_budget = user_budget_chars - suffix_budget
+            if ocr_budget > 200:
+                truncated = user_prompt[:ocr_budget] + "\n[... truncated to fit context ...]\n" + suffix
+            else:
+                truncated = user_prompt[:user_budget_chars]
+        else:
+            truncated = user_prompt[:user_budget_chars]
+
+        logger.warning(
+            f"Truncated prompt from {len(user_prompt)} to {len(truncated)} chars "
+            f"to fit server context window ({max_ctx} tokens, {reserve_output} reserved for output). "
+            f"Increase llama.cpp --ctx-size for better quality."
+        )
+        return truncated
+
+    def _openai_parse_response(self, result: dict) -> str:
+        """Extract content from OpenAI-compatible chat completion response.
+
+        Handles Qwen3 thinking mode by stripping <think>...</think> blocks,
+        and strips markdown code fences wrapping JSON.
+        """
+        choices = result.get("choices", [])
+        if not choices:
+            raise LLMError("Empty choices in OpenAI-compatible response")
+        content = choices[0].get("message", {}).get("content", "").strip()
+
+        # Strip Qwen3 thinking tags if present
+        if "<think>" in content:
+            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
+        # Strip markdown code fences (```json ... ``` or ``` ... ```)
+        if content.startswith("```"):
+            content = re.sub(r"^```(?:json)?\s*\n?", "", content)
+            content = re.sub(r"\n?```\s*$", "", content)
+            content = content.strip()
+
+        return content
+
+    async def _call_openai_chat(
+        self,
+        user_prompt: str,
+        json_schema: dict,
+        settings
+    ) -> dict:
+        """Call OpenAI-compatible Chat API with structured JSON output.
+
+        Compatible with llama.cpp server, vLLM, and other OpenAI API-compatible servers.
+        Includes the JSON schema in the prompt for instruction-following,
+        and uses response_format json_object for basic JSON constraint.
+
+        Automatically detects the server's context window and truncates
+        prompts to fit, reserving space for output generation.
+        """
+        # Build schema description for the prompt
+        schema_json = json.dumps(json_schema, indent=2)
+        schema_size = len(schema_json)
+
+        # Include schema in user prompt so model knows exact output format
+        enhanced_prompt = (
+            f"{user_prompt}\n\n"
+            f"Respond with a JSON object matching this schema:\n"
+            f"```json\n{schema_json}\n```\n\n"
+            f"Output ONLY the JSON object, no explanations."
+        )
+
+        system_prompt = EXTRACTION_SYSTEM_PROMPT
+
+        # Detect server context and truncate prompt if needed
+        server_ctx = await self._detect_server_context_size(settings)
+        effective_ctx = server_ctx or settings.llm.context_window
+        enhanced_prompt = self._truncate_prompt_for_context(
+            system_prompt, enhanced_prompt, effective_ctx
+        )
+
+        logger.info(
+            f"OpenAI-compat chat request: model={settings.llm.model}, "
+            f"system_prompt={len(system_prompt)} chars, "
+            f"user_prompt={len(enhanced_prompt)} chars, "
+            f"schema={schema_size} chars, "
+            f"server_ctx={effective_ctx}, "
+            f"timeout={settings.llm.timeout_seconds}s"
+        )
+
+        headers = self._openai_headers(settings)
+
+        async with httpx.AsyncClient(
+            timeout=settings.llm.timeout_seconds
+        ) as client:
+            for attempt in range(settings.llm.max_retries):
+                try:
+                    logger.info(f"Sending OpenAI-compat chat request (attempt {attempt + 1}/{settings.llm.max_retries})...")
+                    response = await client.post(
+                        f"{settings.llm.base_url}/v1/chat/completions",
+                        headers=headers,
+                        json={
+                            "model": settings.llm.model,
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": enhanced_prompt}
+                            ],
+                            "stream": False,
+                            "temperature": settings.llm.temperature,
+                            "top_p": settings.llm.top_p,
+                            "top_k": settings.llm.top_k,
+                            "min_p": settings.llm.min_p,
+                            "presence_penalty": settings.llm.presence_penalty,
+                            "max_tokens": 2048,
+                            "response_format": {"type": "json_object"},
+                        }
+                    )
+
+                    # Handle context exceeded error with truncation retry
+                    if response.status_code == 400:
+                        error_data = response.json() if response.text else {}
+                        error_msg = error_data.get("error", {}).get("message", "")
+                        if "exceed" in error_msg and "context" in error_msg:
+                            ctx_match = re.search(r'context size \((\d+)', error_msg)
+                            actual_ctx = int(ctx_match.group(1)) if ctx_match else 4096
+                            LLMExtractor._server_ctx_size = actual_ctx
+                            if attempt < settings.llm.max_retries - 1:
+                                logger.warning(
+                                    f"Request exceeds server context ({actual_ctx} tokens). "
+                                    f"Truncating prompt and retrying."
+                                )
+                                enhanced_prompt = self._truncate_prompt_for_context(
+                                    system_prompt, enhanced_prompt, actual_ctx
+                                )
+                                continue
+                        raise LLMError(
+                            f"OpenAI-compat API error: {response.status_code} - {response.text}"
+                        )
+
+                    if response.status_code != 200:
+                        raise LLMError(
+                            f"OpenAI-compat API error: {response.status_code} - {response.text}"
+                        )
+
+                    result = response.json()
+                    choice = result.get("choices", [{}])[0]
+                    finish_reason = choice.get("finish_reason", "unknown")
+                    usage = result.get("usage", {})
+
+                    logger.info(
+                        f"LLM API response: finish_reason={finish_reason}, "
+                        f"usage={usage}"
+                    )
+
+                    # If output was truncated (finish_reason=length), retry with
+                    # a shorter prompt to leave more room for generation
+                    if finish_reason == "length" and attempt < settings.llm.max_retries - 1:
+                        prompt_tokens = usage.get("prompt_tokens", 0)
+                        completion_tokens = usage.get("completion_tokens", 0)
+                        if prompt_tokens > 0:
+                            # Reduce prompt to use at most 50% of context,
+                            # leaving the rest for output
+                            reduced_ctx = effective_ctx
+                            reserve = max(effective_ctx // 2, completion_tokens * 3)
+                            logger.warning(
+                                f"Response truncated (finish_reason=length, "
+                                f"prompt={prompt_tokens}, completion={completion_tokens}). "
+                                f"Reducing prompt and retrying with {reserve} tokens reserved for output."
+                            )
+                            enhanced_prompt = self._truncate_prompt_for_context(
+                                system_prompt, enhanced_prompt, reduced_ctx,
+                                reserve_output=reserve,
+                            )
+                            continue
+
+                    response_text = self._openai_parse_response(result)
+
+                    logger.info(f"Parsed LLM response ({len(response_text)} chars): {response_text[:500]}")
+
+                    try:
+                        parsed = json.loads(response_text)
+                        logger.info(f"Parsed LLM response: {len(parsed)} fields")
+                        return parsed
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Failed to parse JSON response: {e}")
+                        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                        if json_match:
+                            return json.loads(json_match.group())
+                        raise LLMError(f"Invalid JSON response: {response_text[:200]}")
+
+                except httpx.TimeoutException:
+                    if attempt < settings.llm.max_retries - 1:
+                        logger.warning(f"OpenAI-compat timeout, retrying ({attempt + 1})")
+                        continue
+                    raise LLMError("OpenAI-compat request timed out")
+
+                except httpx.ConnectError:
+                    raise LLMError(
+                        f"Cannot connect to LLM server at {settings.llm.base_url}"
+                    )
+
+        raise LLMError("Max retries exceeded")
+
+    async def _call_openai_chat_vl(
+        self,
+        user_prompt: str,
+        json_schema: dict,
+        images_base64: list[str],
+        settings
+    ) -> dict:
+        """Call OpenAI-compatible Chat API with vision/image input.
+
+        Images are passed as data URIs in the content array.
+        """
+        total_image_size = sum(len(img) for img in images_base64)
+        logger.info(
+            f"OpenAI-compat VL chat request: model={settings.llm.model}, "
+            f"images={len(images_base64)}, "
+            f"total_image_size={total_image_size} chars"
+        )
+
+        system_prompt = VL_EXTRACTION_SYSTEM_PROMPT if settings.llm.disable_thinking else VL_EXTRACTION_SYSTEM_PROMPT.replace("/no_think\n\n", "")
+        headers = self._openai_headers(settings)
+
+        # Include schema in prompt for instruction-following
+        schema_json = json.dumps(json_schema, indent=2)
+        enhanced_prompt = (
+            f"{user_prompt}\n\n"
+            f"Respond with a JSON object matching this schema:\n"
+            f"```json\n{schema_json}\n```\n\n"
+            f"Output ONLY the JSON object, no explanations."
+        )
+
+        # Truncate text prompt for context (images are tokenized separately)
+        server_ctx = await self._detect_server_context_size(settings)
+        effective_ctx = server_ctx or settings.llm.context_window
+        enhanced_prompt = self._truncate_prompt_for_context(
+            system_prompt, enhanced_prompt, effective_ctx
+        )
+
+        # Build content array with text + images
+        content = [{"type": "text", "text": enhanced_prompt}]
+        for img_b64 in images_base64:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{img_b64}"}
+            })
+
+        async with httpx.AsyncClient(
+            timeout=settings.llm.timeout_seconds
+        ) as client:
+            for attempt in range(settings.llm.max_retries):
+                try:
+                    logger.info(f"Sending OpenAI-compat VL request (attempt {attempt + 1}/{settings.llm.max_retries})...")
+                    response = await client.post(
+                        f"{settings.llm.base_url}/v1/chat/completions",
+                        headers=headers,
+                        json={
+                            "model": settings.llm.model,
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": content}
+                            ],
+                            "stream": False,
+                            "temperature": settings.llm.temperature,
+                            "top_p": settings.llm.top_p,
+                            "top_k": settings.llm.top_k,
+                            "min_p": settings.llm.min_p,
+                            "presence_penalty": settings.llm.presence_penalty,
+                            "max_tokens": 2048,
+                            "response_format": {"type": "json_object"},
+                        }
+                    )
+
+                    if response.status_code != 200:
+                        raise LLMError(
+                            f"OpenAI-compat VL API error: {response.status_code} - {response.text}"
+                        )
+
+                    result = response.json()
+                    response_text = self._openai_parse_response(result)
+
+                    logger.info(f"Raw VL response length: {len(response_text)} chars")
+
+                    try:
+                        parsed = json.loads(response_text)
+                        return parsed
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Failed to parse VL JSON response: {e}")
+                        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                        if json_match:
+                            return json.loads(json_match.group())
+                        raise LLMError(f"Invalid JSON response from VL model: {response_text[:200]}")
+
+                except httpx.TimeoutException:
+                    if attempt < settings.llm.max_retries - 1:
+                        logger.warning(f"OpenAI-compat VL timeout, retrying ({attempt + 1})")
+                        continue
+                    raise LLMError("OpenAI-compat VL request timed out")
+
+                except httpx.ConnectError:
+                    raise LLMError(
+                        f"Cannot connect to LLM server at {settings.llm.base_url}"
+                    )
+
+        raise LLMError("Max retries exceeded for VL request")
+
+    async def _call_openai_generate(self, prompt: str, settings) -> str:
+        """Call OpenAI-compatible API for simple text generation.
+
+        Wraps the prompt as a chat completion since OpenAI API has no /generate endpoint.
+        Used by SenderMatcher for correspondent matching and per-field extraction.
+        """
+        headers = self._openai_headers(settings)
+
+        messages = []
+        # Add /no_think system message for Qwen3 thinking models
+        if settings.llm.disable_thinking:
+            messages.append({"role": "system", "content": "/no_think"})
+        messages.append({"role": "user", "content": prompt})
+
+        async with httpx.AsyncClient(
+            timeout=settings.llm.timeout_seconds
+        ) as client:
+            for attempt in range(settings.llm.max_retries):
+                try:
+                    response = await client.post(
+                        f"{settings.llm.base_url}/v1/chat/completions",
+                        headers=headers,
+                        json={
+                            "model": settings.llm.model,
+                            "messages": messages,
+                            "stream": False,
+                            "temperature": settings.llm.temperature,
+                            "top_p": settings.llm.top_p,
+                            "top_k": settings.llm.top_k,
+                            "min_p": settings.llm.min_p,
+                            "presence_penalty": settings.llm.presence_penalty,
+                            "max_tokens": 512,
+                        }
+                    )
+
+                    if response.status_code != 200:
+                        raise LLMError(
+                            f"OpenAI-compat API error: {response.status_code} - {response.text}"
+                        )
+
+                    result = response.json()
+                    return self._openai_parse_response(result)
+
+                except httpx.TimeoutException:
+                    if attempt < settings.llm.max_retries - 1:
+                        logger.warning(f"OpenAI-compat timeout, retrying ({attempt + 1})")
+                        continue
+                    raise LLMError("OpenAI-compat request timed out")
+
+                except httpx.ConnectError:
+                    raise LLMError(
+                        f"Cannot connect to LLM server at {settings.llm.base_url}"
+                    )
+
+        raise LLMError("Max retries exceeded")
+
     def _parse_response(
         self,
         response: str,

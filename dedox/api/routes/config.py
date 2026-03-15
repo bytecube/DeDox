@@ -195,24 +195,43 @@ async def get_system_status(current_user: CurrentUser):
     except Exception as e:
         status_info["services"]["paperless"] = {"status": "offline", "error": str(e)}
     
-    # Ollama
+    # LLM provider
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"{settings.llm.ollama_url}/api/tags")
-            if response.status_code == 200:
-                models = response.json().get("models", [])
-                model_names = [m.get("name", "") for m in models]
-                status_info["services"]["ollama"] = {
-                    "status": "online",
-                    "url": settings.llm.ollama_url,
-                    "models_available": model_names,
-                    "configured_model": settings.llm.model,
-                    "model_loaded": any(settings.llm.model in m for m in model_names),
-                }
+            if settings.llm.provider == "openai-compat":
+                headers = {}
+                if settings.llm.api_key:
+                    headers["Authorization"] = f"Bearer {settings.llm.api_key}"
+                response = await client.get(f"{settings.llm.base_url}/v1/models", headers=headers)
+                if response.status_code == 200:
+                    models_data = response.json().get("data", [])
+                    model_names = [m.get("id", "") for m in models_data]
+                    status_info["services"]["llm"] = {
+                        "status": "online",
+                        "provider": "openai-compat",
+                        "url": settings.llm.base_url,
+                        "models_available": model_names,
+                        "configured_model": settings.llm.model,
+                    }
+                else:
+                    status_info["services"]["llm"] = {"status": "error", "provider": "openai-compat"}
             else:
-                status_info["services"]["ollama"] = {"status": "error"}
+                response = await client.get(f"{settings.llm.ollama_url}/api/tags")
+                if response.status_code == 200:
+                    models = response.json().get("models", [])
+                    model_names = [m.get("name", "") for m in models]
+                    status_info["services"]["llm"] = {
+                        "status": "online",
+                        "provider": "ollama",
+                        "url": settings.llm.ollama_url,
+                        "models_available": model_names,
+                        "configured_model": settings.llm.model,
+                        "model_loaded": any(settings.llm.model in m for m in model_names),
+                    }
+                else:
+                    status_info["services"]["llm"] = {"status": "error", "provider": "ollama"}
     except Exception as e:
-        status_info["services"]["ollama"] = {"status": "offline", "error": str(e)}
+        status_info["services"]["llm"] = {"status": "offline", "provider": settings.llm.provider, "error": str(e)}
     
     # Tesseract
     import shutil
@@ -294,36 +313,61 @@ async def test_paperless_connection(admin: AdminUser):
 
 @router.post("/test-ollama")
 async def test_ollama_connection(admin: AdminUser):
-    """Test connection to Ollama."""
+    """Test connection to LLM provider (Ollama or OpenAI-compatible)."""
     settings = get_settings()
-    
+
     import httpx
-    
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # Check if model is available
-            response = await client.get(f"{settings.llm.ollama_url}/api/tags")
-            
-            if response.status_code == 200:
-                models = response.json().get("models", [])
-                model_names = [m.get("name", "") for m in models]
-                
-                return {
-                    "status": "connected",
-                    "url": settings.llm.ollama_url,
-                    "available_models": model_names,
-                    "configured_model": settings.llm.model,
-                    "model_ready": any(settings.llm.model in m for m in model_names),
-                }
+            if settings.llm.provider == "openai-compat":
+                headers = {}
+                if settings.llm.api_key:
+                    headers["Authorization"] = f"Bearer {settings.llm.api_key}"
+                response = await client.get(f"{settings.llm.base_url}/v1/models", headers=headers)
+
+                if response.status_code == 200:
+                    models_data = response.json().get("data", [])
+                    model_names = [m.get("id", "") for m in models_data]
+
+                    return {
+                        "status": "connected",
+                        "provider": "openai-compat",
+                        "url": settings.llm.base_url,
+                        "available_models": model_names,
+                        "configured_model": settings.llm.model,
+                    }
+                else:
+                    return {
+                        "status": "error",
+                        "provider": "openai-compat",
+                        "code": response.status_code,
+                    }
             else:
-                return {
-                    "status": "error",
-                    "code": response.status_code,
-                }
+                response = await client.get(f"{settings.llm.ollama_url}/api/tags")
+
+                if response.status_code == 200:
+                    models = response.json().get("models", [])
+                    model_names = [m.get("name", "") for m in models]
+
+                    return {
+                        "status": "connected",
+                        "provider": "ollama",
+                        "url": settings.llm.ollama_url,
+                        "available_models": model_names,
+                        "configured_model": settings.llm.model,
+                        "model_ready": any(settings.llm.model in m for m in model_names),
+                    }
+                else:
+                    return {
+                        "status": "error",
+                        "provider": "ollama",
+                        "code": response.status_code,
+                    }
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to connect to Ollama: {e}",
+            detail=f"Failed to connect to LLM ({settings.llm.provider}): {e}",
         )
 
 
@@ -404,21 +448,41 @@ Field: {request.prompt}
 
     try:
         async with httpx.AsyncClient(timeout=settings.llm.timeout_seconds) as client:
-            response = await client.post(
-                f"{settings.llm.base_url}/api/chat",
-                json={
-                    "model": settings.llm.model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    "stream": False,
-                    "format": json_schema,
-                    "options": {
+            if settings.llm.provider == "openai-compat":
+                headers = {"Content-Type": "application/json"}
+                if settings.llm.api_key:
+                    headers["Authorization"] = f"Bearer {settings.llm.api_key}"
+                response = await client.post(
+                    f"{settings.llm.base_url}/v1/chat/completions",
+                    headers=headers,
+                    json={
+                        "model": settings.llm.model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        "stream": False,
                         "temperature": settings.llm.temperature,
+                        "response_format": {"type": "json_object"},
+                        "json_schema": json_schema,
                     }
-                }
-            )
+                )
+            else:
+                response = await client.post(
+                    f"{settings.llm.base_url}/api/chat",
+                    json={
+                        "model": settings.llm.model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        "stream": False,
+                        "format": json_schema,
+                        "options": {
+                            "temperature": settings.llm.temperature,
+                        }
+                    }
+                )
 
             if response.status_code != 200:
                 return TestExtractionResponse(
@@ -427,7 +491,11 @@ Field: {request.prompt}
                 )
 
             result = response.json()
-            raw_response = result.get("message", {}).get("content", "").strip()
+            if settings.llm.provider == "openai-compat":
+                choices = result.get("choices", [])
+                raw_response = choices[0].get("message", {}).get("content", "").strip() if choices else ""
+            else:
+                raw_response = result.get("message", {}).get("content", "").strip()
 
             # Parse JSON response
             try:

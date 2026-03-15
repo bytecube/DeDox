@@ -37,7 +37,7 @@ Documents are enriched with AI-extracted metadata in Paperless-ngx, then synced 
 **Your documents never leave your network.** DeDox is designed from the ground up to operate entirely within your local network:
 
 - **No cloud dependencies**: All processing happens on your hardware
-- **No external API calls**: LLM inference runs locally via Ollama
+- **No external API calls**: LLM inference runs locally via Ollama or llama.cpp
 - **No telemetry or tracking**: Your data stays yours
 - **Air-gapped compatible**: Works without any internet connection
 - **Mobile app**: Connects only via local network (LAN/WiFi) — no internet traffic, no external servers
@@ -52,7 +52,7 @@ DeDox integrates with external services via their APIs, making each component **
 |-----------|---------|-----------|
 | **DeDox** | Document processing, OCR, metadata extraction | Yes (core) |
 | **Paperless-ngx** | Document storage and archive | Yes |
-| **Ollama** | Local LLM for metadata extraction | Yes |
+| **Ollama** or **llama.cpp** | Local LLM for metadata extraction | Yes (one of) |
 | **Open WebUI** | RAG-powered chat with documents | **Optional** |
 
 ### Why This Matters
@@ -72,7 +72,7 @@ openwebui:
 
 - 📷 **Phone Camera Capture**: Live edge detection, perspective correction, multi-page scanning — all via local WiFi, no internet
 - 🔍 **OCR Processing**: Tesseract-based text extraction (German/English) running locally
-- 🤖 **AI Metadata Extraction**: Local LLM-powered extraction of dates, amounts, types, urgency via Ollama
+- 🤖 **AI Metadata Extraction**: Local LLM-powered extraction of dates, amounts, types, urgency via Ollama or llama.cpp
 - 🔐 **Privacy First**: Zero cloud dependencies, zero external API calls, runs entirely on your local network
 - 📦 **Paperless-ngx Integration**: Seamless archival with full metadata mapping (works with existing instances)
 - 💬 **Open WebUI RAG** *(optional)*: Chat with your documents using semantic search and AI-powered Q&A
@@ -101,8 +101,8 @@ All components communicate via standard REST APIs over your local network — **
 │                    ┌─────────────┼───────────────────────┤           │
 │                    │             │                       │           │
 │              ┌──────────┐  ┌─────▼──────┐        ┌──────▼──────┐    │
-│              │ Tesseract│  │   Ollama   │        │  Open WebUI │    │
-│              │   OCR    │  │    LLM     │◀───────│  (optional) │    │
+│              │ Tesseract│  │  Ollama /  │        │  Open WebUI │    │
+│              │   OCR    │  │ llama.cpp  │◀───────│  (optional) │    │
 │              └──────────┘  └────────────┘        └─────────────┘    │
 │                                                                      │
 │  API-Based Integration:                                              │
@@ -111,6 +111,29 @@ All components communicate via standard REST APIs over your local network — **
 │  • Remove or disable any optional component without breaking others  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+## LLM Providers
+
+DeDox supports two LLM backends:
+
+| Provider | API | Best For |
+|----------|-----|----------|
+| **Ollama** (default) | `/api/chat` | Easy setup, model management, GPU passthrough |
+| **OpenAI-compatible** | `/v1/chat/completions` | llama.cpp, vLLM, text-generation-webui |
+
+Configure via environment variable:
+```bash
+# Ollama (default)
+DEDOX_LLM_PROVIDER=ollama
+DEDOX_OLLAMA_URL=http://ollama:11434
+
+# llama.cpp / OpenAI-compatible
+DEDOX_LLM_PROVIDER=openai-compat
+DEDOX_OLLAMA_URL=http://your-server:8080
+DEDOX_LLM_API_KEY=optional-api-key
+```
+
+> **llama.cpp users**: Start your server with `--ctx-size 32768` (or at least 8192) to handle document extraction prompts. The default of 4096 is too small.
 
 ## Quick Start
 
@@ -279,6 +302,28 @@ openwebui:
   enabled: false
 ```
 
+### Proxmox LXC Deployment
+
+For Proxmox users with an existing llama.cpp server and Open WebUI instance:
+
+```bash
+# On Proxmox host: create a Debian 12 LXC with Docker
+bash deploy/proxmox/create-lxc.sh
+
+# Inside the LXC: interactive setup wizard
+pct enter <VMID>
+bash /opt/dedox/deploy/proxmox/setup.sh
+```
+
+The setup wizard will:
+- Auto-detect your llama.cpp server and available models
+- Configure Paperless-ngx with admin credentials
+- Connect to your existing Open WebUI instance
+- Generate security secrets
+- Optionally start all services
+
+See [`deploy/proxmox/README.md`](deploy/proxmox/README.md) for full documentation.
+
 ## Testing
 
 ```bash
@@ -335,9 +380,10 @@ pytest tests/test_pipeline.py -v
 
 ### Common Issues
 
-**Ollama not responding:**
-- Ensure the Ollama container is healthy: `docker-compose logs ollama`
-- The model download can take time on first start
+**LLM not responding:**
+- **Ollama**: Ensure the container is healthy: `docker-compose logs ollama`; model download can take time on first start
+- **llama.cpp**: Verify the server is reachable: `curl http://your-server:8080/v1/models`
+- **Context size error**: Restart llama.cpp with `--ctx-size 32768` (default 4096 is too small)
 - Check GPU availability if using NVIDIA acceleration
 
 **Paperless-ngx connection issues:**

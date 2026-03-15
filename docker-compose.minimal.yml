@@ -22,7 +22,11 @@ services:
       - DEDOX_ADMIN_PASSWORD=${DEDOX_ADMIN_PASSWORD:-changeme123}
       - DEDOX_PAPERLESS_URL=${DEDOX_PAPERLESS_URL:-http://host.docker.internal:8080}
       - DEDOX_PAPERLESS_TOKEN=${DEDOX_PAPERLESS_TOKEN:-}
+      # LLM provider: "ollama" (default) or "openai-compat" (for llama.cpp, vLLM, etc.)
+      - DEDOX_LLM_PROVIDER=${DEDOX_LLM_PROVIDER:-ollama}
       - DEDOX_OLLAMA_URL=http://ollama:11434
+      - DEDOX_LLM_API_KEY=${DEDOX_LLM_API_KEY:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3-vl:8b}
       # Paperless admin credentials for auto token generation (for external Paperless)
       - PAPERLESS_ADMIN_USER=${PAPERLESS_ADMIN_USER:-admin}
       - PAPERLESS_ADMIN_PASSWORD=${PAPERLESS_ADMIN_PASSWORD:-}
@@ -56,7 +60,11 @@ services:
       - DEDOX_JWT_SECRET=${DEDOX_JWT_SECRET:-change-me-in-production}
       - DEDOX_PAPERLESS_URL=${DEDOX_PAPERLESS_URL:-http://host.docker.internal:8080}
       - DEDOX_PAPERLESS_TOKEN=${DEDOX_PAPERLESS_TOKEN:-}
+      # LLM provider: "ollama" (default) or "openai-compat" (for llama.cpp, vLLM, etc.)
+      - DEDOX_LLM_PROVIDER=${DEDOX_LLM_PROVIDER:-ollama}
       - DEDOX_OLLAMA_URL=http://ollama:11434
+      - DEDOX_LLM_API_KEY=${DEDOX_LLM_API_KEY:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3-vl:8b}
       # Paperless admin credentials for auto token generation (for external Paperless)
       - PAPERLESS_ADMIN_USER=${PAPERLESS_ADMIN_USER:-admin}
       - PAPERLESS_ADMIN_PASSWORD=${PAPERLESS_ADMIN_PASSWORD:-}
