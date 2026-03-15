@@ -1319,14 +1319,30 @@ Read ALL text visible in the document carefully."""
 
                     result = response.json()
 
-                    # Log raw content before think-tag stripping for debugging
-                    raw_content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    if "<think>" in raw_content:
-                        logger.info(f"Raw response contains <think> block ({len(raw_content)} chars total)")
+                    # Log full API response structure for debugging
+                    choice = result.get("choices", [{}])[0]
+                    finish_reason = choice.get("finish_reason", "unknown")
+                    message = choice.get("message", {})
+                    raw_content = message.get("content", "")
+                    role = message.get("role", "unknown")
+                    # Log all message keys to detect non-standard fields
+                    msg_keys = list(message.keys())
+                    usage = result.get("usage", {})
+
+                    logger.info(
+                        f"LLM API response: finish_reason={finish_reason}, "
+                        f"role={role}, content_len={len(raw_content)}, "
+                        f"message_keys={msg_keys}, "
+                        f"usage={usage}"
+                    )
+                    if raw_content:
+                        logger.info(f"Raw content first 300 chars: {raw_content[:300]}")
+                    else:
+                        logger.warning(f"Content is empty! Full choice: {json.dumps(choice)[:500]}")
 
                     response_text = self._openai_parse_response(result)
 
-                    logger.info(f"Raw LLM response ({len(response_text)} chars): {response_text[:500]}")
+                    logger.info(f"Parsed LLM response ({len(response_text)} chars): {response_text[:500]}")
 
                     try:
                         parsed = json.loads(response_text)
