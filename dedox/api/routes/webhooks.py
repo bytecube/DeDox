@@ -45,6 +45,7 @@ from dedox.db.repositories.document_repository import DocumentRepository
 from dedox.db.repositories.job_repository import JobRepository
 from dedox.models.document import Document, DocumentStatus
 from dedox.models.job import Job, JobCreate, JobStatus
+from dedox.core.exceptions import PaperlessDocumentNotFoundError
 from dedox.services.paperless_webhook_service import PaperlessWebhookService
 
 logger = logging.getLogger(__name__)
@@ -326,7 +327,13 @@ async def _create_new_document(
     # If file was not included in webhook, download from Paperless API
     if not file_path:
         logger.info(f"Document not included in webhook, downloading from Paperless API")
-        file_path, file_info = await webhook_service.download_document(paperless_id)
+        try:
+            file_path, file_info = await webhook_service.download_document(paperless_id)
+        except PaperlessDocumentNotFoundError:
+            logger.warning(
+                f"Paperless document {paperless_id} no longer exists — skipping job creation"
+            )
+            return
 
         if not file_path:
             logger.error(f"Failed to download document {paperless_id} from Paperless")
@@ -866,7 +873,13 @@ async def _sync_to_openwebui(paperless_id: int, payload: PaperlessWebhookPayload
     try:
         # Download document from Paperless API
         logger.info(f"Downloading document {paperless_id} from Paperless for Open WebUI sync")
-        file_path, file_info = await webhook_service.download_document(paperless_id)
+        try:
+            file_path, file_info = await webhook_service.download_document(paperless_id)
+        except PaperlessDocumentNotFoundError:
+            logger.warning(
+                f"Paperless document {paperless_id} no longer exists — skipping Open WebUI sync"
+            )
+            return
 
         if not file_path:
             logger.error(f"Failed to download document {paperless_id} from Paperless")

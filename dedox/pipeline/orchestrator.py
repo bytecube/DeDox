@@ -16,6 +16,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 from dedox.core.config import get_settings
+from dedox.core.exceptions import PaperlessDocumentNotFoundError
 from dedox.db.database import Database
 from dedox.db.repositories import DocumentRepository, JobRepository
 from dedox.db.repositories.processing_log_repository import ProcessingLogRepository
@@ -306,6 +307,24 @@ class PipelineOrchestrator:
                 if self._on_stage_complete:
                     self._on_stage_complete(job, processor.stage, result)
                 
+            except PaperlessDocumentNotFoundError as e:
+                # Document was deleted from Paperless — fail permanently, no retry.
+                error_msg = str(e)
+                logger.error(f"{processor.name}: {error_msg}")
+                await self._log(
+                    job,
+                    error_msg,
+                    level=LogLevel.ERROR,
+                    stage=processor.stage.value,
+                    details={"exception_type": "PaperlessDocumentNotFoundError"},
+                )
+                job.fail_stage(error_msg)
+                job.max_retries = 0  # Prevent any manual retry
+                job.mark_failed(error_msg)
+                await self.job_repo.update(job)
+                await self._update_document_status(document, DocumentStatus.FAILED)
+                return job
+
             except Exception as e:
                 error_msg = f"{processor.name} error: {str(e)}"
                 logger.exception(error_msg)

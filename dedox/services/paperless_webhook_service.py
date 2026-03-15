@@ -13,7 +13,7 @@ from uuid import uuid4
 import httpx
 
 from dedox.core.config import get_settings, get_metadata_fields
-from dedox.core.exceptions import PaperlessError
+from dedox.core.exceptions import PaperlessDocumentNotFoundError, PaperlessError
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,8 @@ class PaperlessWebhookService:
             try:
                 # Get document metadata first
                 response = await client.get(f"/api/documents/{paperless_id}/")
+                if response.status_code == 404:
+                    raise PaperlessDocumentNotFoundError(paperless_id)
                 if response.status_code != 200:
                     logger.error(
                         f"Failed to get document {paperless_id}: {response.status_code}"
@@ -134,6 +136,8 @@ class PaperlessWebhookService:
 
                 return file_path, file_info
 
+            except PaperlessDocumentNotFoundError:
+                raise  # Let callers handle 404 specifically
             except httpx.TimeoutException:
                 logger.error(f"Timeout downloading document {paperless_id}")
                 return None, {}

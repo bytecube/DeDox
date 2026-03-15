@@ -57,6 +57,23 @@ class PaperlessAPIError(PaperlessError):
     pass
 
 
+class PaperlessDocumentNotFoundError(PaperlessError):
+    """Paperless document no longer exists (HTTP 404).
+
+    Raised when a document has been deleted from Paperless while DeDox
+    still holds a reference to it.  Jobs that hit this error should be
+    marked permanently failed — retrying will never succeed.
+    """
+
+    def __init__(self, paperless_id: int):
+        super().__init__(
+            f"Paperless document {paperless_id} not found (deleted?)",
+            status_code=404,
+            details={"paperless_id": paperless_id},
+        )
+        self.paperless_id = paperless_id
+
+
 class StorageError(DedoxError):
     """File storage errors."""
     pass

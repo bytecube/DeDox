@@ -21,7 +21,7 @@ def _utcnow() -> datetime:
 import httpx
 
 from dedox.core.config import get_settings
-from dedox.core.exceptions import PaperlessConnectionError, PaperlessAPIError
+from dedox.core.exceptions import PaperlessConnectionError, PaperlessAPIError, PaperlessDocumentNotFoundError
 from dedox.db import get_database
 from dedox.models.document import DocumentStatus
 from dedox.models.job import JobStage
@@ -74,6 +74,8 @@ class Finalizer(BaseProcessor):
                 processing_time_ms=self._measure_time(start_time),
             )
 
+        except PaperlessDocumentNotFoundError:
+            raise  # Propagate to orchestrator for permanent failure
         except Exception as e:
             logger.exception(f"Finalization failed: {e}")
             return ProcessorResult.fail(
@@ -179,6 +181,8 @@ class Finalizer(BaseProcessor):
                     headers=headers,
                     json=update_data,
                 )
+                if response.status_code == 404:
+                    raise PaperlessDocumentNotFoundError(context.paperless_id)
                 if response.status_code != 200:
                     logger.warning(f"Failed to update correspondent/type: {response.text}")
 

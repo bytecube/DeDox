@@ -79,7 +79,7 @@ class Job(BaseModel):
 
     # Retry tracking
     retry_count: int = 0
-    max_retries: int = 3
+    max_retries: int = 1
     
     class Config:
         from_attributes = True
