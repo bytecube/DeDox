@@ -33,8 +33,8 @@ DeDox is a document processing service that captures, processes, extracts metada
          │                    │                    │
          ▼                    ▼                    ▼
 ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
-│   Ollama    │      │ Paperless   │      │  Tesseract  │
-│    (LLM)    │      │    -ngx     │      │    (OCR)    │
+│  Ollama /   │      │ Paperless   │      │  Tesseract  │
+│  llama.cpp  │      │    -ngx     │      │    (OCR)    │
 └─────────────┘      └─────────────┘      └─────────────┘
 ```
 
@@ -201,11 +201,24 @@ Paperless Document Added
 - **Operations**: Document upload, metadata update, tag management
 - **Custom Fields**: Recipient, Due Date, Amount, Summary, etc.
 
-### Ollama (LLM)
+### LLM (Ollama or llama.cpp)
 
-- **Protocol**: REST API (OpenAI-compatible)
-- **Model**: Qwen 2.5 14B (configurable)
+DeDox supports two LLM providers:
+
+- **Ollama** (default): Uses `/api/chat` with native JSON schema constraints via the `format` parameter
+- **OpenAI-compatible** (llama.cpp, vLLM): Uses `/v1/chat/completions` with `response_format: json_object`
+
+Both providers support:
+- Structured batch extraction (all fields in one request)
+- Per-field fallback extraction
+- Vision-Language models (images sent as base64 data URIs)
+- Qwen3 thinking mode suppression (`/no_think`)
+- Automatic `<think>` block stripping from responses
+
+**Configuration**:
+- **Model**: Configurable (default: Qwen 2.5 14B for Ollama)
 - **Usage**: Metadata extraction from OCR text
+- **Context window**: 32768 tokens (configurable; llama.cpp servers must be started with matching `--ctx-size`)
 
 ### Tesseract OCR
 

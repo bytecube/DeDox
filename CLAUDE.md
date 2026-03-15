@@ -7,7 +7,7 @@
 DeDox (**de**+**dox** = "detoxify your documents") is a document processing pipeline that:
 - Receives documents from Paperless-ngx via webhooks
 - Extracts text via OCR (Tesseract)
-- Extracts metadata via local LLM (Ollama)
+- Extracts metadata via local LLM (Ollama or llama.cpp)
 - Updates Paperless-ngx with enriched metadata
 - Syncs documents to Open WebUI for RAG-powered search
 
@@ -16,7 +16,7 @@ DeDox (**de**+**dox** = "detoxify your documents") is a document processing pipe
 - **Backend**: Python 3.10+, FastAPI, Uvicorn
 - **Database**: SQLite with aiosqlite (async)
 - **OCR**: Tesseract (German/English)
-- **LLM**: Ollama (Qwen 2.5 14B default)
+- **LLM**: Ollama or llama.cpp (OpenAI-compatible API)
 - **Document Archive**: Paperless-ngx
 - **RAG Interface**: Open WebUI
 - **Authentication**: JWT tokens + API keys
@@ -87,7 +87,7 @@ docker-compose up -d
 ## Key Architectural Decisions
 
 1. **Webhook-first Architecture**: Documents flow from Paperless-ngx via webhooks, not direct uploads
-2. **Local LLM**: All AI processing happens locally via Ollama for privacy
+2. **Local LLM**: All AI processing happens locally via Ollama or llama.cpp (OpenAI-compatible) for privacy
 3. **Pipeline Pattern**: Processing stages are modular and can be skipped/customized
 4. **Async Throughout**: All I/O operations use async/await for performance
 5. **Paperless as Source of Truth**: DeDox enriches metadata, Paperless stores documents
@@ -109,6 +109,15 @@ Key variables (see `.env.example`):
 - `DEDOX_PAPERLESS_TOKEN` - Paperless API token
 - `DEDOX_WEBHOOK_SECRET` - Webhook HMAC secret
 - `DEDOX_OPENWEBUI_API_KEY` - Open WebUI API key
+- `DEDOX_LLM_PROVIDER` - LLM backend: `ollama` (default) or `openai-compat`
+- `DEDOX_OLLAMA_URL` - LLM server URL
+- `DEDOX_LLM_API_KEY` - API key for authenticated LLM endpoints
+
+## Deployment Options
+
+- **Full Stack** (`docker-compose.yml`): DeDox + Paperless + Ollama + Open WebUI
+- **Minimal** (`docker-compose.minimal.yml`): DeDox + Ollama + Open WebUI (external Paperless)
+- **Proxmox** (`deploy/proxmox/`): LXC container with llama.cpp + external Open WebUI
 
 ## Testing
 
