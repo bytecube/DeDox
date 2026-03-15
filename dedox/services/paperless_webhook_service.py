@@ -520,25 +520,19 @@ class PaperlessWebhookService:
             logger.exception(f"Error updating document {paperless_id} metadata: {e}")
             return False
 
-    async def update_document_content(
-        self,
-        paperless_id: int,
-        content: str,
-        timeout: float = 120.0,
-    ) -> bool:
+    async def update_document_content(self, paperless_id: int, content: str) -> bool:
         """Update the document content (OCR text) in Paperless.
 
         This overwrites the built-in OCR result with externally extracted text,
         such as from a Vision-Language model.
 
-        A longer timeout than the default is used because Paperless triggers a
-        full-text re-index after a content update, which can take 30-90 seconds
-        depending on document size and server load.
+        NOTE: callers should wrap this in asyncio.wait_for — Paperless can take
+        a long time to respond when its Celery workers are still indexing the
+        same document (PostgreSQL row lock contention).
 
         Args:
             paperless_id: Paperless document ID
             content: The text content to set
-            timeout: Request timeout in seconds (default 120 to cover re-indexing)
 
         Returns:
             True if successful
@@ -548,7 +542,6 @@ class PaperlessWebhookService:
                 response = await client.patch(
                     f"/api/documents/{paperless_id}/",
                     json={"content": content},
-                    timeout=timeout,
                 )
 
                 if response.status_code != 200:

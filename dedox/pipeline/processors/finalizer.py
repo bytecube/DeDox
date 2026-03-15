@@ -7,6 +7,7 @@ marks document for review if needed.
 Supports both upload-originated and webhook-originated documents.
 """
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timezone
@@ -102,20 +103,31 @@ class Finalizer(BaseProcessor):
             if title and len(title) > 128:
                 title = title[:125] + "..."
 
-        # Sync OCR text to Paperless content field
-        # This updates the searchable text in Paperless with our extracted text
+        # Sync OCR text to Paperless content field (non-critical, best-effort).
+        # Wrapped in wait_for so a slow Paperless response (e.g. DB row lock while
+        # Celery is still indexing the document) is cancelled rather than blocking
+        # the critical tag-swap and metadata finalization below.
         if context.ocr_text:
-            content_updated = await webhook_service.update_document_content(
-                paperless_id=context.paperless_id,
-                content=context.ocr_text
-            )
-            if content_updated:
-                logger.info(
-                    f"Synced {len(context.ocr_text)} chars of OCR text to Paperless"
+            try:
+                content_updated = await asyncio.wait_for(
+                    webhook_service.update_document_content(
+                        paperless_id=context.paperless_id,
+                        content=context.ocr_text,
+                    ),
+                    timeout=15.0,
                 )
-            else:
+                if content_updated:
+                    logger.info(
+                        f"Synced {len(context.ocr_text)} chars of OCR text to Paperless"
+                    )
+                else:
+                    logger.warning(
+                        f"Failed to sync OCR text to Paperless for document {context.paperless_id}"
+                    )
+            except asyncio.TimeoutError:
                 logger.warning(
-                    f"Failed to sync OCR text to Paperless for document {context.paperless_id}"
+                    f"Content sync timed out for document {context.paperless_id} "
+                    "(Paperless likely still indexing) — skipping, finalization continues"
                 )
 
         # Finalize the document in Paperless
